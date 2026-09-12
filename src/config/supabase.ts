@@ -1,11 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
-import WebSocket from 'ws';
+import WS from 'ws';
 import { env } from './env';
 
 // Polyfill WebSocket for Node < 22 (Railway Nixpacks often defaults to Node 18)
-const g = globalThis as typeof globalThis & { WebSocket?: unknown };
-if (!g.WebSocket) {
-  g.WebSocket = WebSocket;
+if (!(globalThis as { WebSocket?: unknown }).WebSocket) {
+  (globalThis as { WebSocket?: unknown }).WebSocket = WS;
 }
 
 export const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
@@ -15,6 +14,6 @@ export const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY,
   },
   realtime: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    transport: WebSocket as any,
+    transport: WS as any,
   },
 });
