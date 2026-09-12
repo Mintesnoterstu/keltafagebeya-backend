@@ -94,7 +94,7 @@ async function markOrderPaid(
     .from('orders')
     .update({
       payment_status: 'completed',
-      status: 'paid',
+      status: 'confirmed',
       payment_id: paymentId,
       updated_at: new Date().toISOString(),
     })
@@ -102,7 +102,7 @@ async function markOrderPaid(
 
   const user = order.users as { telegram_id: number; id: string } | null;
   if (user) {
-    await notifyOrderStatusChange(user.telegram_id, user.id, order.id, 'paid');
+    await notifyOrderStatusChange(user.telegram_id, user.id, order.id, 'confirmed');
   }
 
   logger.info(`Order ${order.id} marked as paid via Stripe`);
