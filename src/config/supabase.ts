@@ -7,8 +7,9 @@ export const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY,
     autoRefreshToken: false,
     persistSession: false,
   },
+  // Node < 22 has no native WebSocket (Railway often uses Node 18)
   realtime: {
-    // Node < 22 has no native WebSocket; required on Railway Node 18
-    transport: ws as unknown as typeof WebSocket,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    transport: ws as any,
   },
 });
