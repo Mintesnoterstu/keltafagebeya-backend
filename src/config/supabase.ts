@@ -1,15 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
-import ws from 'ws';
+import WebSocket from 'ws';
 import { env } from './env';
+
+// Polyfill WebSocket for Node < 22 (Railway Nixpacks often defaults to Node 18)
+const g = globalThis as typeof globalThis & { WebSocket?: unknown };
+if (!g.WebSocket) {
+  g.WebSocket = WebSocket;
+}
 
 export const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
   auth: {
     autoRefreshToken: false,
     persistSession: false,
   },
-  // Node < 22 has no native WebSocket (Railway often uses Node 18)
   realtime: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    transport: ws as any,
+    transport: WebSocket as any,
   },
 });
