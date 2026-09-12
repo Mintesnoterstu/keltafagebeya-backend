@@ -129,7 +129,11 @@ export async function chapaWebhook(
   next: NextFunction
 ): Promise<void> {
   try {
-    await handleChapaWebhook(req.body);
+    const signature =
+      (req.headers['x-chapa-signature'] as string | undefined) ||
+      (req.headers['chapa-signature'] as string | undefined);
+
+    await handleChapaWebhook(req.body, signature);
     res.status(200).json({ received: true });
   } catch (err) {
     next(err);

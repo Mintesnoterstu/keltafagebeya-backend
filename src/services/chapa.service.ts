@@ -1,4 +1,5 @@
 import axios from 'axios';
+import crypto from 'crypto';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { supabase } from '../config/supabase';
@@ -116,12 +117,40 @@ export async function verifyChapaPayment(txRef: string): Promise<ChapaVerifyResp
   }
 }
 
-export async function handleChapaWebhook(body: {
-  trx_ref?: string;
-  tx_ref?: string;
-  status?: string;
-  [key: string]: unknown;
-}): Promise<void> {
+export async function handleChapaWebhook(
+  body: {
+    trx_ref?: string;
+    tx_ref?: string;
+    status?: string;
+    [key: string]: unknown;
+  },
+  signatureHeader?: string
+): Promise<void> {
+  if (env.CHAPA_WEBHOOK_SECRET) {
+    if (!signatureHeader) {
+      throw new AppError('Missing x-chapa-signature header', 401);
+    }
+
+    const payload =
+      typeof body === 'string' ? body : JSON.stringify(body);
+    const expected = crypto
+      .createHmac('sha256', env.CHAPA_WEBHOOK_SECRET)
+      .update(payload)
+      .digest('hex');
+
+    const provided = signatureHeader.replace(/^sha256=/i, '');
+    const valid =
+      expected.length === provided.length &&
+      crypto.timingSafeEqual(
+        Buffer.from(expected),
+        Buffer.from(provided)
+      );
+
+    if (!valid) {
+      throw new AppError('Invalid Chapa webhook signature', 401);
+    }
+  }
+
   const txRef = body.trx_ref || body.tx_ref;
   const status = body.status;
 
@@ -160,18 +189,18 @@ async function markChapaOrderPaid(txRef: string): Promise<void> {
     return;
   }
 
-  await supabase
+    await supabase
     .from('orders')
     .update({
       payment_status: 'completed',
-      status: 'paid',
+      status: 'confirmed',
       updated_at: new Date().toISOString(),
     })
     .eq('id', order.id);
 
   const user = order.users as { telegram_id: number; id: string } | null;
   if (user) {
-    await notifyOrderStatusChange(user.telegram_id, user.id, order.id, 'paid');
+    await notifyOrderStatusChange(user.telegram_id, user.id, order.id, 'confirmed');
   }
 
   logger.info(`Order ${order.id} marked as paid via Chapa`);

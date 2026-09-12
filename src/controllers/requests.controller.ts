@@ -7,6 +7,7 @@ import {
   notifyNewRequest,
   notifyRequestStatusChange,
 } from '../services/telegram.service';
+import { logger } from '../config/logger';
 
 export async function createRequest(
   req: AuthRequest,
@@ -16,10 +17,24 @@ export async function createRequest(
   try {
     if (!req.user) throw new AppError('Not authenticated', 401);
 
+    const payload = req.body as {
+      title: string;
+      description: string | null;
+      budget: number | null;
+      category: string | null;
+      urgency: string;
+      images: string[];
+    };
+
     const { data, error } = await supabase
       .from('requests')
       .insert({
-        ...req.body,
+        title: payload.title,
+        description: payload.description,
+        budget: payload.budget,
+        category: payload.category,
+        urgency: payload.urgency || 'normal',
+        images: payload.images || [],
         user_id: req.user.id,
         status: 'pending',
       })
@@ -27,12 +42,23 @@ export async function createRequest(
       .single();
 
     if (error || !data) {
+      logger.error(`Create request failed: ${error?.message}`);
       throw new AppError(error?.message || 'Failed to create request', 500);
     }
 
     const userName =
       `${req.user.first_name} ${req.user.last_name || ''}`.trim();
-    await notifyNewRequest(data.id, data.title, userName);
+
+    // Never fail the API if Telegram is down — log and continue
+    try {
+      await notifyNewRequest(data.id, data.title, userName, {
+        urgency: data.urgency,
+        description: data.description,
+        category: data.category,
+      });
+    } catch (notifyErr) {
+      logger.error(`Request saved but Telegram notify failed: ${notifyErr}`);
+    }
 
     const body: ApiResponse = {
       success: true,
@@ -113,7 +139,7 @@ export async function updateRequest(
     if (!req.user) throw new AppError('Not authenticated', 401);
 
     const { id } = req.params;
-    const { status, admin_notes } = req.body;
+    const { status, admin_notes, assigned_to } = req.body;
 
     const { data: existing, error: fetchError } = await supabase
       .from('requests')
@@ -123,13 +149,16 @@ export async function updateRequest(
 
     if (fetchError || !existing) throw new AppError('Request not found', 404);
 
+    const updates: Record<string, unknown> = {
+      status,
+      admin_notes: admin_notes ?? existing.admin_notes,
+      updated_at: new Date().toISOString(),
+    };
+    if (assigned_to !== undefined) updates.assigned_to = assigned_to;
+
     const { data, error } = await supabase
       .from('requests')
-      .update({
-        status,
-        admin_notes: admin_notes ?? existing.admin_notes,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updates)
       .eq('id', id)
       .select()
       .single();

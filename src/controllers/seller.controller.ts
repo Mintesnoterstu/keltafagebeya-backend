@@ -571,7 +571,12 @@ export async function applyAsSeller(
 
     const userName =
       `${req.user.first_name} ${req.user.last_name || ''}`.trim();
-    await notifyNewSellerApplication(data.id, business_name, userName);
+    await notifyNewSellerApplication(
+      data.id,
+      business_name,
+      userName,
+      business_type
+    );
 
     res.status(201).json({
       success: true,

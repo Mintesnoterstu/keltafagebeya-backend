@@ -6,7 +6,9 @@ import { ApiResponse, OrderItem } from '../types';
 import {
   notifyNewOrder,
   notifyOrderStatusChange,
+  notifySellerNewOrder,
 } from '../services/telegram.service';
+import { logger } from '../config/logger';
 
 export async function createOrder(
   req: AuthRequest,
@@ -88,7 +90,36 @@ export async function createOrder(
 
     const buyerName =
       `${req.user.first_name} ${req.user.last_name || ''}`.trim();
-    await notifyNewOrder(order.id, totalAmount, currency, buyerName);
+
+    try {
+      await notifyNewOrder(order.id, totalAmount, currency, buyerName);
+    } catch (e) {
+      logger.error(`Order created but admin Telegram notify failed: ${e}`);
+    }
+
+    // Notify each unique seller
+    try {
+      const sellerCounts = new Map<string, number>();
+      for (const item of orderItems) {
+        sellerCounts.set(
+          item.seller_id,
+          (sellerCounts.get(item.seller_id) || 0) + item.quantity
+        );
+      }
+
+      for (const [sellerId, count] of sellerCounts) {
+        const { data: seller } = await supabase
+          .from('users')
+          .select('telegram_id')
+          .eq('id', sellerId)
+          .maybeSingle();
+        if (seller?.telegram_id) {
+          await notifySellerNewOrder(seller.telegram_id, order.id, count);
+        }
+      }
+    } catch (e) {
+      logger.error(`Seller order notify failed: ${e}`);
+    }
 
     const body: ApiResponse = {
       success: true,

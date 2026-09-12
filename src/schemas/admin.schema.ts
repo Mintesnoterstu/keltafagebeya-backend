@@ -3,8 +3,8 @@ import { z } from 'zod';
 const ethiopianPhone = z
   .string()
   .min(9)
-  .max(15)
-  .regex(/^(\+251|0)?[79]\d{8}$/, 'Invalid Ethiopian phone number');
+  .max(20)
+  .regex(/^(\+?251|0)?[79]\d{8}$/, 'Invalid Ethiopian phone number');
 
 export const adminRequestUpdateSchema = z.object({
   status: z
@@ -52,13 +52,24 @@ export const sellerApplicationSchema = z.object({
 
 export const sellerProductCreateSchema = z.object({
   name: z.string().min(3).max(200),
-  description: z.string().min(1).max(5000),
+  description: z.string().max(5000).optional().default(''),
   price: z.coerce.number().positive(),
-  currency: z.string().default('ETB'),
+  currency: z.string().optional().default('ETB'),
   category: z.string().min(1),
-  sub_category: z.string().min(1),
-  stock: z.coerce.number().int().min(0),
-  images: z.array(z.string().url()).optional().default([]),
+  sub_category: z.string().optional().default('Other'),
+  stock: z.coerce.number().int().min(0).default(0),
+  images: z
+    .preprocess((val) => {
+      if (typeof val === 'string') {
+        try {
+          return JSON.parse(val);
+        } catch {
+          return val ? [val] : [];
+        }
+      }
+      return val ?? [];
+    }, z.array(z.string()).optional())
+    .default([]),
   is_available: z
     .union([z.boolean(), z.enum(['true', 'false'])])
     .optional()
