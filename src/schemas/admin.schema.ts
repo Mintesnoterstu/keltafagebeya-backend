@@ -1,0 +1,94 @@
+import { z } from 'zod';
+
+const ethiopianPhone = z
+  .string()
+  .min(9)
+  .max(15)
+  .regex(/^(\+251|0)?[79]\d{8}$/, 'Invalid Ethiopian phone number');
+
+export const adminRequestUpdateSchema = z.object({
+  status: z
+    .enum([
+      'pending',
+      'reviewing',
+      'sourcing',
+      'found',
+      'closed',
+      'approved',
+      'rejected',
+      'fulfilled',
+    ])
+    .optional(),
+  admin_notes: z.string().max(5000).optional().nullable(),
+  assigned_to: z.string().uuid().optional().nullable(),
+  urgency: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
+});
+
+export const adminNotifySchema = z.object({
+  message: z.string().min(1).max(4000),
+});
+
+export const adminListQuerySchema = z.object({
+  status: z.string().optional(),
+  urgency: z.string().optional(),
+  search: z.string().optional(),
+  seller_id: z.string().uuid().optional(),
+  date_from: z.string().optional(),
+  date_to: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const adminRejectSellerSchema = z.object({
+  admin_notes: z.string().max(2000).optional().nullable(),
+});
+
+export const sellerApplicationSchema = z.object({
+  business_name: z.string().min(2).max(150),
+  business_description: z.string().min(50).max(5000),
+  phone: ethiopianPhone,
+  business_type: z.enum(['individual', 'small_business', 'company']),
+});
+
+export const sellerProductCreateSchema = z.object({
+  name: z.string().min(3).max(200),
+  description: z.string().min(1).max(5000),
+  price: z.coerce.number().positive(),
+  currency: z.string().default('ETB'),
+  category: z.string().min(1),
+  sub_category: z.string().min(1),
+  stock: z.coerce.number().int().min(0),
+  images: z.array(z.string().url()).optional().default([]),
+  is_available: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .optional()
+    .transform((v) =>
+      v === undefined ? true : v === true || v === 'true'
+    ),
+});
+
+export const sellerProductUpdateSchema = sellerProductCreateSchema.partial();
+
+export const sellerOrderStatusSchema = z.object({
+  status: z.enum(['confirmed', 'processing', 'shipped', 'delivered', 'cancelled']),
+});
+
+export const sellerProfileUpdateSchema = z.object({
+  business_name: z.string().min(2).max(150).optional(),
+  business_description: z.string().max(5000).optional().nullable(),
+  business_phone: z.string().min(9).max(15).optional().nullable(),
+  seller_name: z.string().min(1).max(100).optional(),
+  seller_bio: z.string().max(1000).optional().nullable(),
+  phone: z.string().optional().nullable(),
+});
+
+export const sellerProductQuerySchema = z.object({
+  status: z.enum(['active', 'inactive', 'all']).optional().default('all'),
+  search: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const idParamSchema = z.object({
+  id: z.string().uuid(),
+});

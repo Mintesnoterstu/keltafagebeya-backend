@@ -65,8 +65,9 @@ export async function telegramAuth(
           last_name: telegramUser.last_name ?? null,
           username: telegramUser.username ?? null,
           photo_url: telegramUser.photo_url ?? null,
-          role: 'buyer',
+          role: 'customer',
           is_seller: false,
+          seller_status: 'none',
         })
         .select()
         .single();

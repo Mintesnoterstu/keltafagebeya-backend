@@ -1,6 +1,8 @@
 import { Request } from 'express';
 
-export type UserRole = 'buyer' | 'seller' | 'admin';
+export type UserRole = 'customer' | 'buyer' | 'seller' | 'admin';
+export type SellerStatus = 'none' | 'pending' | 'approved' | 'rejected';
+export type BusinessType = 'individual' | 'small_business' | 'company';
 
 export interface User {
   id: string;
@@ -12,8 +14,32 @@ export interface User {
   phone: string | null;
   role: UserRole;
   is_seller: boolean;
+  seller_status: SellerStatus;
   seller_name: string | null;
   seller_bio: string | null;
+  business_name: string | null;
+  business_description: string | null;
+  business_phone: string | null;
+  business_type: BusinessType | null;
+  admin_notes: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Request-scoped flags set by middleware */
+  isAdmin?: boolean;
+  isSeller?: boolean;
+}
+
+export interface SellerApplication {
+  id: string;
+  user_id: string;
+  business_name: string;
+  business_description: string;
+  phone: string;
+  business_type: BusinessType;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_notes: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -30,6 +56,7 @@ export interface Product {
   images: string[];
   stock: number;
   is_available: boolean;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +83,7 @@ export interface OrderItem {
 export type OrderStatus =
   | 'pending'
   | 'paid'
+  | 'confirmed'
   | 'processing'
   | 'shipped'
   | 'delivered'
@@ -63,7 +91,7 @@ export type OrderStatus =
   | 'refunded';
 
 export type PaymentMethod = 'stripe' | 'chapa' | 'cash';
-export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'refunded';
+export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'refunded' | 'paid';
 
 export interface Order {
   id: string;
@@ -81,7 +109,17 @@ export interface Order {
   updated_at: string;
 }
 
-export type RequestStatus = 'pending' | 'reviewing' | 'approved' | 'rejected' | 'fulfilled';
+export type RequestStatus =
+  | 'pending'
+  | 'reviewing'
+  | 'sourcing'
+  | 'found'
+  | 'closed'
+  | 'approved'
+  | 'rejected'
+  | 'fulfilled';
+
+export type RequestUrgency = 'low' | 'normal' | 'high' | 'urgent';
 
 export interface ProductRequest {
   id: string;
@@ -92,7 +130,9 @@ export interface ProductRequest {
   category: string | null;
   images: string[];
   status: RequestStatus;
+  urgency: RequestUrgency | null;
   admin_notes: string | null;
+  assigned_to: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -160,3 +200,15 @@ export const PRODUCT_CATEGORIES: Record<string, string[]> = {
   Books: ['Fiction', 'Non-Fiction', 'Educational', 'Comics'],
   Other: ['Miscellaneous'],
 };
+
+export function isAdminRole(role?: UserRole): boolean {
+  return role === 'admin';
+}
+
+export function isSellerRole(role?: UserRole, isSeller?: boolean): boolean {
+  return role === 'seller' || role === 'admin' || isSeller === true;
+}
+
+export function isCustomerRole(role?: UserRole): boolean {
+  return role === 'customer' || role === 'buyer' || !role;
+}

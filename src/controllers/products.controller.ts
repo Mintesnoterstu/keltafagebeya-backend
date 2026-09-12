@@ -32,7 +32,8 @@ export async function getProducts(
       .select('*, users!products_seller_id_fkey(id, first_name, last_name, username, seller_name, photo_url)', {
         count: 'exact',
       })
-      .eq('is_available', true);
+      .eq('is_available', true)
+      .neq('is_active', false);
 
     if (category) query = query.eq('category', category);
     if (sub_category) query = query.eq('sub_category', sub_category);

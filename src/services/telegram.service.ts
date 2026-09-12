@@ -117,3 +117,59 @@ export async function notifyRequestStatusChange(
     { request_id: requestId, status }
   );
 }
+
+export async function notifyCustomMessage(
+  telegramId: number,
+  userId: string,
+  message: string,
+  title = 'Message from KeltaFagebeya'
+): Promise<void> {
+  await notifyUser(telegramId, message);
+  await createInAppNotification(userId, title, message, 'custom');
+}
+
+export async function notifyNewSellerApplication(
+  applicationId: string,
+  businessName: string,
+  userName: string
+): Promise<void> {
+  await notifyAdmin(
+    `🏪 <b>New Seller Application</b>\n` +
+      `ID: <code>${applicationId}</code>\n` +
+      `Business: ${businessName}\n` +
+      `Applicant: ${userName}`
+  );
+}
+
+export async function notifySellerApplicationDecision(
+  telegramId: number,
+  userId: string,
+  approved: boolean,
+  notes?: string | null
+): Promise<void> {
+  const message = approved
+    ? `🎉 Your seller application was <b>approved</b>! You can now list products on KeltaFagebeya.`
+    : `❌ Your seller application was <b>rejected</b>.${notes ? `\nNotes: ${notes}` : ''}`;
+
+  await notifyUser(telegramId, message);
+  await createInAppNotification(
+    userId,
+    approved ? 'Seller Approved' : 'Seller Rejected',
+    approved
+      ? 'Your seller application was approved'
+      : 'Your seller application was rejected',
+    'seller_application',
+    { approved, notes: notes ?? null }
+  );
+}
+
+export async function notifySellerNewOrder(
+  telegramId: number,
+  orderId: string,
+  itemCount: number
+): Promise<void> {
+  await notifyUser(
+    telegramId,
+    `🛒 New order <code>${orderId.slice(0, 8)}</code> includes <b>${itemCount}</b> of your product(s).`
+  );
+}

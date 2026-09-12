@@ -9,8 +9,18 @@ export const createRequestSchema = z.object({
 });
 
 export const updateRequestSchema = z.object({
-  status: z.enum(['pending', 'reviewing', 'approved', 'rejected', 'fulfilled']),
+  status: z.enum([
+    'pending',
+    'reviewing',
+    'sourcing',
+    'found',
+    'closed',
+    'approved',
+    'rejected',
+    'fulfilled',
+  ]),
   admin_notes: z.string().max(2000).optional().nullable(),
+  assigned_to: z.string().uuid().optional().nullable(),
 });
 
 export const requestIdSchema = z.object({

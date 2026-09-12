@@ -120,10 +120,55 @@ npm start
 - `POST /api/payments/chapa/webhook`
 - `POST /api/payments/chapa/verify/:id`
 
-### Seller
-- `GET /api/seller/stats`
-- `GET /api/seller/products`
-- `PUT /api/seller/profile`
+### Seller (dashboard + application)
+- `POST /api/seller/apply` — Submit seller application (customer)
+- `GET /api/seller/application-status` — Application / seller status
+- `GET /api/seller/stats` — Dashboard stats
+- `GET /api/seller/products` — Own products (`status`, `search`, `page`, `limit`)
+- `POST /api/seller/products` — Create product (JSON or multipart `images`)
+- `PUT /api/seller/products/:id` — Update own product
+- `DELETE /api/seller/products/:id` — Soft-delete (`is_active=false`)
+- `GET /api/seller/orders` — Orders containing seller's products
+- `PUT /api/seller/orders/:id/status` — `confirmed|processing|shipped|delivered|cancelled`
+- `GET /api/seller/profile` — Business profile
+- `PUT /api/seller/profile` — Update business profile
+
+### Admin (requires `role=admin` or matching `TELEGRAM_ADMIN_CHAT_ID`)
+- `GET /api/admin/stats`
+- `GET /api/admin/requests` — Filters: `status`, `urgency`, `search`, `page`, `limit`
+- `GET /api/admin/requests/:id`
+- `PUT /api/admin/requests/:id` — Update status / notes / assignee
+- `POST /api/admin/requests/:id/notify` — `{ message }` Telegram to customer
+- `GET /api/admin/sellers` — Seller applications
+- `GET /api/admin/sellers/:id`
+- `PUT /api/admin/sellers/:id/approve`
+- `PUT /api/admin/sellers/:id/reject` — optional `{ admin_notes }`
+- `GET /api/admin/orders` — Filters: `status`, `seller_id`, `date_from`, `date_to`
+- `GET /api/admin/orders/:id`
+
+## Database migration (required)
+
+Run the SQL in Supabase SQL Editor before using admin/seller features:
+
+```
+sql/001_admin_seller_rbac.sql
+```
+
+Also ensure a public Storage bucket named `product-images` exists.
+
+## Frontend API base URL
+
+Set in Vercel / local frontend:
+
+```
+NEXT_PUBLIC_API_URL=https://keltafagebeya-backend-production.up.railway.app
+```
+
+Protected routes need:
+
+```
+Authorization: Bearer <jwt>
+```
 
 ## Authentication
 
@@ -133,11 +178,21 @@ Send the JWT from `/api/auth/telegram` as:
 Authorization: Bearer <token>
 ```
 
+**Frontend:** set `NEXT_PUBLIC_API_URL=https://keltafagebeya-backend-production.up.railway.app` and include the Bearer token on protected calls.
+
 **Local testing:** In `development`, you can POST `{ "initData": "dev-bypass" }` to get a test user + token without Telegram.
 
-## Database Tables (Supabase)
+## Database
 
-Expected tables: `users`, `products`, `orders`, `requests`, `cart_items`, `reviews`, `notifications`.
+Expected tables: `users`, `products`, `orders`, `requests`, `cart_items`, `reviews`, `notifications`, `seller_applications`.
+
+**Run this migration in Supabase SQL Editor** before using admin/seller features:
+
+```
+sql/001_admin_seller_rbac.sql
+```
+
+Also create a public Storage bucket named `product-images`.
 
 The API uses the **service role** key, so it bypasses RLS. Keep that key secret and never expose it to the frontend.
 
