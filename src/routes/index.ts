@@ -25,6 +25,7 @@ router.get('/health', (_req, res) => {
   res.status(200).json({
     success: true,
     message: 'KeltaFagebeya API is healthy',
+    version: '1.1.0-notifications',
     timestamp: new Date().toISOString(),
   });
 });
