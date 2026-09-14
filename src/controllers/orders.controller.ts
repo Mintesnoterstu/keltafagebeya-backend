@@ -92,7 +92,15 @@ export async function createOrder(
       `${req.user.first_name} ${req.user.last_name || ''}`.trim();
 
     try {
-      await notifyNewOrder(order.id, totalAmount, currency, buyerName);
+      await notifyNewOrder({
+        orderId: order.id,
+        total: totalAmount,
+        currency,
+        customerName: buyerName,
+        username: req.user.username,
+        paymentMethod: payment_method,
+        itemCount: orderItems.length,
+      });
     } catch (e) {
       logger.error(`Order created but admin Telegram notify failed: ${e}`);
     }

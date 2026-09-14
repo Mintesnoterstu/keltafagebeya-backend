@@ -24,22 +24,52 @@ export async function createRequest(
       category: string | null;
       urgency: string;
       images: string[];
+      price_range?: string | null;
     };
 
-    const { data, error } = await supabase
+    const productName = payload.title;
+
+    // Support both legacy `title` and schema `product_name` columns
+    const insertRow: Record<string, unknown> = {
+      user_id: req.user.id,
+      status: 'pending',
+      description: payload.description,
+      category: payload.category,
+      urgency: payload.urgency || 'normal',
+      images: payload.images || [],
+      title: productName,
+      product_name: productName,
+    };
+
+    if (payload.budget != null) insertRow.budget = payload.budget;
+    if (payload.price_range) insertRow.price_range = payload.price_range;
+
+    let { data, error } = await supabase
       .from('requests')
-      .insert({
-        title: payload.title,
-        description: payload.description,
-        budget: payload.budget,
-        category: payload.category,
-        urgency: payload.urgency || 'normal',
-        images: payload.images || [],
-        user_id: req.user.id,
-        status: 'pending',
-      })
+      .insert(insertRow)
       .select()
       .single();
+
+    // Fallback if DB only has product_name (no title) or vice versa
+    if (error) {
+      logger.warn(`Request insert retry without dual columns: ${error.message}`);
+      const fallback = {
+        user_id: req.user.id,
+        status: 'pending',
+        product_name: productName,
+        title: productName,
+        description: payload.description,
+        category: payload.category,
+        urgency: payload.urgency || 'normal',
+      };
+      const retry = await supabase
+        .from('requests')
+        .insert(fallback)
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error || !data) {
       logger.error(`Create request failed: ${error?.message}`);
@@ -49,23 +79,25 @@ export async function createRequest(
     const userName =
       `${req.user.first_name} ${req.user.last_name || ''}`.trim();
 
-    // Never fail the API if Telegram is down — log and continue
     try {
-      await notifyNewRequest(data.id, data.title, userName, {
+      await notifyNewRequest({
+        requestId: data.id,
+        productName: data.product_name || data.title || productName,
+        customerName: userName,
+        username: req.user.username,
+        category: data.category,
         urgency: data.urgency,
         description: data.description,
-        category: data.category,
       });
     } catch (notifyErr) {
       logger.error(`Request saved but Telegram notify failed: ${notifyErr}`);
     }
 
-    const body: ApiResponse = {
+    res.status(201).json({
       success: true,
       message: 'Product request submitted',
       data,
-    };
-    res.status(201).json(body);
+    } satisfies ApiResponse);
   } catch (err) {
     next(err);
   }
@@ -91,11 +123,9 @@ export async function getRequests(
     }
 
     const { data, error } = await query;
-
     if (error) throw new AppError(error.message, 500);
 
-    const body: ApiResponse = { success: true, data };
-    res.status(200).json(body);
+    res.status(200).json({ success: true, data } satisfies ApiResponse);
   } catch (err) {
     next(err);
   }
@@ -110,7 +140,6 @@ export async function getRequestById(
     if (!req.user) throw new AppError('Not authenticated', 401);
 
     const { id } = req.params;
-
     const { data, error } = await supabase
       .from('requests')
       .select('*')
@@ -123,8 +152,7 @@ export async function getRequestById(
       throw new AppError('Not authorized', 403);
     }
 
-    const body: ApiResponse = { success: true, data };
-    res.status(200).json(body);
+    res.status(200).json({ success: true, data } satisfies ApiResponse);
   } catch (err) {
     next(err);
   }
@@ -169,20 +197,23 @@ export async function updateRequest(
 
     const user = existing.users as { telegram_id: number; id: string } | null;
     if (user) {
-      await notifyRequestStatusChange(
-        user.telegram_id,
-        user.id,
-        id,
-        status
-      );
+      try {
+        await notifyRequestStatusChange(
+          user.telegram_id,
+          user.id,
+          id,
+          status
+        );
+      } catch (e) {
+        logger.error(`Request status notify failed: ${e}`);
+      }
     }
 
-    const body: ApiResponse = {
+    res.status(200).json({
       success: true,
       message: 'Request updated',
       data,
-    };
-    res.status(200).json(body);
+    } satisfies ApiResponse);
   } catch (err) {
     next(err);
   }

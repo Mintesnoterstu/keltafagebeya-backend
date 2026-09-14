@@ -29,4 +29,38 @@ router.get('/health', (_req, res) => {
   });
 });
 
+router.get('/test-notification', async (_req, res) => {
+  const { sendTelegramNotification } = await import(
+    '../services/telegram.service'
+  );
+  const { env } = await import('../config/env');
+
+  const result = await sendTelegramNotification(
+    env.TELEGRAM_ADMIN_CHAT_ID,
+    `✅ <b>TEST NOTIFICATION</b>\n` +
+      `KeltaFagebeya backend is connected.\n` +
+      `Admin chat: <code>${env.TELEGRAM_ADMIN_CHAT_ID}</code>\n` +
+      `Time: ${new Date().toISOString()}`
+  );
+
+  if (result.ok) {
+    res.status(200).json({
+      success: true,
+      message: 'Test notification sent to admin Telegram',
+      data: { chat_id: env.TELEGRAM_ADMIN_CHAT_ID },
+    });
+    return;
+  }
+
+  res.status(502).json({
+    success: false,
+    message: 'Failed to send test notification',
+    error: result.error,
+    data: {
+      chat_id: env.TELEGRAM_ADMIN_CHAT_ID,
+      hint: 'Open @keltafagebeyaBot in Telegram and tap Start, then retry. Confirm TELEGRAM_ADMIN_CHAT_ID on Railway matches @userinfobot.',
+    },
+  });
+});
+
 export default router;

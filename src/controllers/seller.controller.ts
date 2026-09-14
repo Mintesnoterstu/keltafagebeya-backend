@@ -6,8 +6,10 @@ import { ApiResponse, OrderItem } from '../types';
 import {
   notifyNewSellerApplication,
   notifyOrderStatusChange,
+  notifyNewProduct,
 } from '../services/telegram.service';
 import { uploadMultipleProductImages } from '../services/storage.service';
+import { logger } from '../config/logger';
 
 function pagination(page: number, limit: number) {
   const from = (page - 1) * limit;
@@ -194,6 +196,21 @@ export async function createSellerProduct(
 
     if (error || !data) {
       throw new AppError(error?.message || 'Failed to create product', 500);
+    }
+
+    try {
+      await notifyNewProduct({
+        productId: data.id,
+        productName: data.name,
+        sellerName:
+          req.user.business_name ||
+          req.user.seller_name ||
+          `${req.user.first_name} ${req.user.last_name || ''}`.trim(),
+        price: Number(data.price),
+        category: data.category,
+      });
+    } catch (e) {
+      logger.error(`Product created but admin notify failed: ${e}`);
     }
 
     res.status(201).json({
@@ -571,12 +588,18 @@ export async function applyAsSeller(
 
     const userName =
       `${req.user.first_name} ${req.user.last_name || ''}`.trim();
-    await notifyNewSellerApplication(
-      data.id,
-      business_name,
-      userName,
-      business_type
-    );
+    try {
+      await notifyNewSellerApplication({
+        applicationId: data.id,
+        applicantName: userName,
+        username: req.user.username,
+        businessName: business_name,
+        businessType: business_type,
+        phone,
+      });
+    } catch (e) {
+      logger.error(`Seller application saved but notify failed: ${e}`);
+    }
 
     res.status(201).json({
       success: true,

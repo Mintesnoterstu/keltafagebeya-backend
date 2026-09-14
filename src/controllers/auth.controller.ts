@@ -7,6 +7,7 @@ import { validateTelegramInitData } from '../utils/telegramAuth';
 import { AppError } from '../utils/AppError';
 import { ApiResponse, JwtPayload, User } from '../types';
 import { logger } from '../config/logger';
+import { notifyNewUser } from '../services/telegram.service';
 
 export async function telegramAuth(
   req: AuthRequest,
@@ -77,6 +78,16 @@ export async function telegramAuth(
         throw new AppError('Failed to create user', 500);
       }
       user = created as User;
+
+      try {
+        await notifyNewUser({
+          name: `${user.first_name} ${user.last_name || ''}`.trim(),
+          username: user.username,
+          telegramId: user.telegram_id,
+        });
+      } catch (e) {
+        logger.error(`New user notify failed: ${e}`);
+      }
     }
 
     const payload: JwtPayload = {

@@ -3,7 +3,7 @@ import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { supabase } from '../config/supabase';
 import { AppError } from '../utils/AppError';
-import { notifyOrderStatusChange } from './telegram.service';
+import { notifyOrderStatusChange, notifyPaymentReceived } from './telegram.service';
 
 export const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
@@ -103,6 +103,17 @@ async function markOrderPaid(
   const user = order.users as { telegram_id: number; id: string } | null;
   if (user) {
     await notifyOrderStatusChange(user.telegram_id, user.id, order.id, 'confirmed');
+  }
+
+  try {
+    await notifyPaymentReceived({
+      orderId: order.id,
+      amount: Number(order.total_amount || order.total || 0),
+      method: 'stripe',
+      currency: order.currency || 'ETB',
+    });
+  } catch (e) {
+    logger.error(`Stripe payment admin notify failed: ${e}`);
   }
 
   logger.info(`Order ${order.id} marked as paid via Stripe`);
