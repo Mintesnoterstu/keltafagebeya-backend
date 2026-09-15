@@ -76,7 +76,8 @@ export function createApp(): Application {
     res.json({
       success: true,
       message: 'Welcome to KeltaFagebeya API (ክልታፋገብያ)',
-      version: '1.1.0-notifications',
+      version: '1.0.0',
+      build: 'notify-2026-09-15',
       docs: '/api/health',
       testNotification: '/api/test-notification',
     });
