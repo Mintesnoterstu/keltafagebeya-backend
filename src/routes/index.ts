@@ -26,7 +26,7 @@ router.get('/health', (_req, res) => {
     success: true,
     message: 'KeltaFagebeya API is healthy',
     version: '1.0.0',
-    build: 'login-fix-2026-09-15',
+    build: 'login-fix-2026-09-15b',
     timestamp: new Date().toISOString(),
   });
 });
