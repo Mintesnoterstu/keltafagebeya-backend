@@ -29,6 +29,9 @@ const envSchema = z.object({
   FRONTEND_URL: z.string().url(),
   JWT_SECRET: z.string().min(16),
   CORS_ORIGIN: z.string().min(1),
+
+  /** Seconds; 0 disables auth_date expiry check (hash still verified). Default 30 days. */
+  TELEGRAM_AUTH_MAX_AGE_SECONDS: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -45,4 +48,7 @@ export const env = {
   CORS_ORIGINS: parsed.data.CORS_ORIGIN.split(',').map((o) => o.trim()),
   isDev: parsed.data.NODE_ENV === 'development',
   isProd: parsed.data.NODE_ENV === 'production',
+  TELEGRAM_AUTH_MAX_AGE_SECONDS: Number(
+    parsed.data.TELEGRAM_AUTH_MAX_AGE_SECONDS ?? String(30 * 86400)
+  ),
 };

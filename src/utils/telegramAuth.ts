@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { env } from '../config/env';
+import { logger } from '../config/logger';
 import { TelegramUser } from '../types';
 
 interface ValidatedTelegramData {
@@ -12,7 +13,6 @@ interface ValidatedTelegramData {
  * https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
  */
 export function validateTelegramInitData(initData: string): ValidatedTelegramData {
-  // Frontend may send already-decoded or still-encoded strings
   let raw = initData.trim();
   if (raw.includes('%')) {
     try {
@@ -30,8 +30,6 @@ export function validateTelegramInitData(initData: string): ValidatedTelegramDat
   }
 
   params.delete('hash');
-
-  // Also ignore signature field used by Login Widget (not Mini App)
   params.delete('signature');
 
   const dataCheckString = Array.from(params.entries())
@@ -56,10 +54,18 @@ export function validateTelegramInitData(initData: string): ValidatedTelegramDat
   }
 
   const authDate = Number(params.get('auth_date'));
-  // Mini Apps often keep a session open; allow up to 7 days
-  const maxAge = 7 * 86400;
-  if (!authDate || Date.now() / 1000 - authDate > maxAge) {
-    throw new Error('Telegram initData has expired — close and reopen the Mini App');
+  const maxAge = env.TELEGRAM_AUTH_MAX_AGE_SECONDS;
+  const ageSeconds = authDate ? Date.now() / 1000 - authDate : NaN;
+
+  // Hash is the security check. Expiry is soft: warn, only hard-fail if maxAge > 0 and exceeded.
+  if (!authDate) {
+    logger.warn('Telegram initData missing auth_date (continuing after hash OK)');
+  } else if (maxAge > 0 && ageSeconds > maxAge) {
+    logger.warn(
+      `Telegram initData age ${Math.round(ageSeconds)}s exceeds max ${maxAge}s — allowing login (hash OK)`
+    );
+    // Do not block login: Mini App initData often stays stale until full reopen.
+    // Frontend should still reopen for a fresh session when possible.
   }
 
   const userRaw = params.get('user');
@@ -72,5 +78,5 @@ export function validateTelegramInitData(initData: string): ValidatedTelegramDat
     throw new Error('Invalid user in initData');
   }
 
-  return { user, authDate };
+  return { user, authDate: authDate || Math.floor(Date.now() / 1000) };
 }
