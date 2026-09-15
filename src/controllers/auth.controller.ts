@@ -9,16 +9,97 @@ import { ApiResponse, JwtPayload, User } from '../types';
 import { logger } from '../config/logger';
 import { notifyNewUser } from '../services/telegram.service';
 
+async function upsertTelegramUser(telegramUser: {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+}): Promise<{ user: User; isNew: boolean }> {
+  const { data: existing } = await supabase
+    .from('users')
+    .select('*')
+    .eq('telegram_id', telegramUser.id)
+    .maybeSingle();
+
+  if (existing) {
+    const { data: updated, error } = await supabase
+      .from('users')
+      .update({
+        first_name: telegramUser.first_name,
+        last_name: telegramUser.last_name ?? null,
+        username: telegramUser.username ?? null,
+        photo_url: telegramUser.photo_url ?? existing.photo_url,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existing.id)
+      .select()
+      .single();
+
+    if (error || !updated) {
+      throw new AppError(error?.message || 'Failed to update user', 500);
+    }
+    return { user: updated as User, isNew: false };
+  }
+
+  const fullInsert = {
+    telegram_id: telegramUser.id,
+    first_name: telegramUser.first_name,
+    last_name: telegramUser.last_name ?? null,
+    username: telegramUser.username ?? null,
+    photo_url: telegramUser.photo_url ?? null,
+    role: 'customer',
+    is_seller: false,
+    seller_status: 'none',
+  };
+
+  let { data: created, error } = await supabase
+    .from('users')
+    .insert(fullInsert)
+    .select()
+    .single();
+
+  // Retry with minimal columns if schema differs
+  if (error) {
+    logger.warn(`User insert retry (minimal): ${error.message}`);
+    const retry = await supabase
+      .from('users')
+      .insert({
+        telegram_id: telegramUser.id,
+        first_name: telegramUser.first_name,
+        last_name: telegramUser.last_name ?? null,
+        username: telegramUser.username ?? null,
+      })
+      .select()
+      .single();
+    created = retry.data;
+    error = retry.error;
+  }
+
+  if (error || !created) {
+    logger.error(`User create error: ${error?.message}`);
+    throw new AppError(error?.message || 'Failed to create user', 500);
+  }
+
+  return { user: created as User, isNew: true };
+}
+
 export async function telegramAuth(
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const { initData } = req.body;
+    const initData = req.body.initData as string;
 
-    // In development, allow a bypass for testing without real Telegram data
-    let telegramUser;
+    let telegramUser: {
+      id: number;
+      first_name: string;
+      last_name?: string;
+      username?: string;
+      photo_url?: string;
+    };
+
     if (env.isDev && initData === 'dev-bypass') {
       telegramUser = {
         id: 123456789,
@@ -31,54 +112,21 @@ export async function telegramAuth(
       telegramUser = validated.user;
     }
 
-    const { data: existing } = await supabase
-      .from('users')
-      .select('*')
-      .eq('telegram_id', telegramUser.id)
-      .maybeSingle();
+    // Auto-promote configured admin telegram id
+    const { user, isNew } = await upsertTelegramUser(telegramUser);
 
-    let user: User;
-
-    if (existing) {
-      const { data: updated, error } = await supabase
+    if (
+      String(user.telegram_id) === String(env.TELEGRAM_ADMIN_CHAT_ID) &&
+      user.role !== 'admin'
+    ) {
+      await supabase
         .from('users')
-        .update({
-          first_name: telegramUser.first_name,
-          last_name: telegramUser.last_name ?? null,
-          username: telegramUser.username ?? null,
-          photo_url: telegramUser.photo_url ?? existing.photo_url,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id)
-        .select()
-        .single();
+        .update({ role: 'admin', updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      user.role = 'admin';
+    }
 
-      if (error || !updated) {
-        throw new AppError('Failed to update user', 500);
-      }
-      user = updated as User;
-    } else {
-      const { data: created, error } = await supabase
-        .from('users')
-        .insert({
-          telegram_id: telegramUser.id,
-          first_name: telegramUser.first_name,
-          last_name: telegramUser.last_name ?? null,
-          username: telegramUser.username ?? null,
-          photo_url: telegramUser.photo_url ?? null,
-          role: 'customer',
-          is_seller: false,
-          seller_status: 'none',
-        })
-        .select()
-        .single();
-
-      if (error || !created) {
-        logger.error(`User create error: ${error?.message}`);
-        throw new AppError('Failed to create user', 500);
-      }
-      user = created as User;
-
+    if (isNew) {
       try {
         await notifyNewUser({
           name: `${user.first_name} ${user.last_name || ''}`.trim(),
@@ -98,13 +146,13 @@ export async function telegramAuth(
 
     const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: '30d' });
 
-    const body: ApiResponse = {
+    res.status(200).json({
       success: true,
       message: 'Authenticated successfully',
-      data: { user, token },
-    };
-    res.status(200).json(body);
+      data: { user, token, role: user.role },
+    } satisfies ApiResponse);
   } catch (err) {
+    logger.error(`Telegram auth failed: ${(err as Error).message}`);
     if (err instanceof AppError) {
       next(err);
       return;
@@ -123,32 +171,31 @@ export async function getMe(
       throw new AppError('Not authenticated', 401);
     }
 
-    const body: ApiResponse = {
+    res.status(200).json({
       success: true,
       data: req.user,
-    };
-    res.status(200).json(body);
+    } satisfies ApiResponse);
   } catch (err) {
     next(err);
   }
 }
 
-/** Public config the frontend needs (publishable keys only — no secrets). */
 export async function getConfig(
   _req: AuthRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const body: ApiResponse = {
+    res.status(200).json({
       success: true,
       data: {
         stripe_publishable_key: env.STRIPE_PUBLISHABLE_KEY || null,
         telegram_bot_username: env.TELEGRAM_BOT_USERNAME || null,
         frontend_url: env.FRONTEND_URL,
+        api_version: '1.0.0',
+        build: 'auth-fix-2026-09-15',
       },
-    };
-    res.status(200).json(body);
+    } satisfies ApiResponse);
   } catch (err) {
     next(err);
   }
