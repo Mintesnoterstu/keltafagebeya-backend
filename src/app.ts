@@ -13,18 +13,40 @@ export function createApp(): Application {
 
   app.set('trust proxy', 1);
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      contentSecurityPolicy: false,
+    })
+  );
 
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || env.CORS_ORIGINS.includes(origin) || env.isDev) {
+        // Telegram WebView / same-origin proxies may omit Origin
+        if (!origin) {
           callback(null, true);
           return;
         }
+
+        const allowed =
+          env.CORS_ORIGINS.includes(origin) ||
+          origin === env.FRONTEND_URL ||
+          origin.endsWith('.vercel.app') ||
+          origin.includes('web.telegram.org') ||
+          env.isDev;
+
+        if (allowed) {
+          callback(null, true);
+          return;
+        }
+
+        logger.warn(`CORS blocked origin: ${origin}`);
         callback(new Error(`CORS blocked for origin: ${origin}`));
       },
       credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
     })
   );
 
