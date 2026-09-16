@@ -24,47 +24,38 @@ export async function createRequest(
       category: string | null;
       urgency: string;
       images: string[];
-      price_range?: string | null;
     };
 
     const productName = payload.title;
-
-    // Support both legacy `title` and schema `product_name` columns
-    const insertRow: Record<string, unknown> = {
-      user_id: req.user.id,
-      status: 'pending',
-      description: payload.description,
-      category: payload.category,
-      urgency: payload.urgency || 'normal',
-      images: payload.images || [],
-      title: productName,
-      product_name: productName,
-    };
-
-    if (payload.budget != null) insertRow.budget = payload.budget;
-    if (payload.price_range) insertRow.price_range = payload.price_range;
-
     let { data, error } = await supabase
       .from('requests')
-      .insert(insertRow)
+      .insert({
+        title: productName,
+        product_name: productName,
+        description: payload.description,
+        budget: payload.budget,
+        category: payload.category,
+        urgency: payload.urgency || 'normal',
+        images: payload.images || [],
+        user_id: req.user.id,
+        status: 'pending',
+      })
       .select()
       .single();
 
-    // Fallback if DB only has product_name (no title) or vice versa
     if (error) {
-      logger.warn(`Request insert retry without dual columns: ${error.message}`);
-      const fallback = {
-        user_id: req.user.id,
-        status: 'pending',
-        product_name: productName,
-        title: productName,
-        description: payload.description,
-        category: payload.category,
-        urgency: payload.urgency || 'normal',
-      };
+      logger.warn(`Request insert retry: ${error.message}`);
       const retry = await supabase
         .from('requests')
-        .insert(fallback)
+        .insert({
+          product_name: productName,
+          title: productName,
+          description: payload.description,
+          category: payload.category,
+          urgency: payload.urgency || 'normal',
+          user_id: req.user.id,
+          status: 'pending',
+        })
         .select()
         .single();
       data = retry.data;
@@ -93,11 +84,12 @@ export async function createRequest(
       logger.error(`Request saved but Telegram notify failed: ${notifyErr}`);
     }
 
-    res.status(201).json({
+    const body: ApiResponse = {
       success: true,
       message: 'Product request submitted',
       data,
-    } satisfies ApiResponse);
+    };
+    res.status(201).json(body);
   } catch (err) {
     next(err);
   }
@@ -123,9 +115,11 @@ export async function getRequests(
     }
 
     const { data, error } = await query;
+
     if (error) throw new AppError(error.message, 500);
 
-    res.status(200).json({ success: true, data } satisfies ApiResponse);
+    const body: ApiResponse = { success: true, data };
+    res.status(200).json(body);
   } catch (err) {
     next(err);
   }
@@ -140,6 +134,7 @@ export async function getRequestById(
     if (!req.user) throw new AppError('Not authenticated', 401);
 
     const { id } = req.params;
+
     const { data, error } = await supabase
       .from('requests')
       .select('*')
@@ -152,7 +147,8 @@ export async function getRequestById(
       throw new AppError('Not authorized', 403);
     }
 
-    res.status(200).json({ success: true, data } satisfies ApiResponse);
+    const body: ApiResponse = { success: true, data };
+    res.status(200).json(body);
   } catch (err) {
     next(err);
   }
@@ -197,23 +193,20 @@ export async function updateRequest(
 
     const user = existing.users as { telegram_id: number; id: string } | null;
     if (user) {
-      try {
-        await notifyRequestStatusChange(
-          user.telegram_id,
-          user.id,
-          id,
-          status
-        );
-      } catch (e) {
-        logger.error(`Request status notify failed: ${e}`);
-      }
+      await notifyRequestStatusChange(
+        user.telegram_id,
+        user.id,
+        id,
+        status
+      );
     }
 
-    res.status(200).json({
+    const body: ApiResponse = {
       success: true,
       message: 'Request updated',
       data,
-    } satisfies ApiResponse);
+    };
+    res.status(200).json(body);
   } catch (err) {
     next(err);
   }

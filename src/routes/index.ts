@@ -8,6 +8,8 @@ import paymentsRoutes from './payments.routes';
 import sellerRoutes from './seller.routes';
 import adminRoutes from './admin.routes';
 import uploadRoutes from './upload.routes';
+import { sendTelegramNotification } from '../services/telegram.service';
+import { env } from '../config/env';
 
 const router = Router();
 
@@ -25,18 +27,12 @@ router.get('/health', (_req, res) => {
   res.status(200).json({
     success: true,
     message: 'KeltaFagebeya API is healthy',
-    version: '1.0.0',
-    build: 'hash-fix-2026-09-16',
     timestamp: new Date().toISOString(),
   });
 });
 
+/** Verify Telegram admin notifications */
 router.get('/test-notification', async (_req, res) => {
-  const { sendTelegramNotification } = await import(
-    '../services/telegram.service'
-  );
-  const { env } = await import('../config/env');
-
   const result = await sendTelegramNotification(
     env.TELEGRAM_ADMIN_CHAT_ID,
     `✅ <b>TEST NOTIFICATION</b>\n` +
@@ -60,7 +56,8 @@ router.get('/test-notification', async (_req, res) => {
     error: result.error,
     data: {
       chat_id: env.TELEGRAM_ADMIN_CHAT_ID,
-      hint: 'Open @keltafagebeyaBot in Telegram and tap Start, then retry. Confirm TELEGRAM_ADMIN_CHAT_ID on Railway matches @userinfobot.',
+      hint:
+        'Open @keltafagebeyaBot and tap Start. On Railway set TELEGRAM_ADMIN_CHAT_ID=8118358536 (8576 is invalid).',
     },
   });
 });

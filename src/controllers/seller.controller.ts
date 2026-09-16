@@ -1,15 +1,15 @@
-import { Response, NextFunction } from 'express';
-import { AuthRequest } from '../middleware/auth';
-import { supabase } from '../config/supabase';
-import { AppError } from '../utils/AppError';
-import { ApiResponse, OrderItem } from '../types';
+import { Response, NextFunction } from "express";
+import { AuthRequest } from "../middleware/auth";
+import { supabase } from "../config/supabase";
+import { AppError } from "../utils/AppError";
+import { ApiResponse, OrderItem } from "../types";
 import {
   notifyNewSellerApplication,
   notifyOrderStatusChange,
   notifyNewProduct,
-} from '../services/telegram.service';
-import { uploadMultipleProductImages } from '../services/storage.service';
-import { logger } from '../config/logger';
+} from "../services/telegram.service";
+import { uploadMultipleProductImages } from "../services/storage.service";
+import { logger } from "../config/logger";
 
 function pagination(page: number, limit: number) {
   const from = (page - 1) * limit;
@@ -19,26 +19,26 @@ function pagination(page: number, limit: number) {
 export async function getSellerStats(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
 
     const sellerId = req.user.id;
 
     const { data: products, error: productsError } = await supabase
-      .from('products')
-      .select('id, stock, is_available, is_active, price')
-      .eq('seller_id', sellerId);
+      .from("products")
+      .select("id, stock, is_available, is_active, price")
+      .eq("seller_id", sellerId);
 
     if (productsError) throw new AppError(productsError.message, 500);
 
     const productList = products ?? [];
 
     const { data: orders, error: ordersError } = await supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: false })
+      .from("orders")
+      .select("*")
+      .order("created_at", { ascending: false })
       .limit(1000);
 
     if (ordersError) throw new AppError(ordersError.message, 500);
@@ -46,7 +46,7 @@ export async function getSellerStats(
     const sellerOrders = (orders ?? []).filter(
       (order) =>
         Array.isArray(order.items) &&
-        order.items.some((item: OrderItem) => item.seller_id === sellerId)
+        order.items.some((item: OrderItem) => item.seller_id === sellerId),
     );
 
     let totalRevenue = 0;
@@ -54,24 +54,24 @@ export async function getSellerStats(
 
     for (const order of sellerOrders) {
       const sellerItems = (order.items as OrderItem[]).filter(
-        (item) => item.seller_id === sellerId
+        (item) => item.seller_id === sellerId,
       );
       const orderRevenue = sellerItems.reduce(
         (sum, item) => sum + item.price * item.quantity,
-        0
+        0,
       );
 
       if (
-        order.payment_status === 'completed' ||
-        order.payment_status === 'paid' ||
-        ['paid', 'delivered', 'shipped', 'processing', 'confirmed'].includes(
-          order.status
+        order.payment_status === "completed" ||
+        order.payment_status === "paid" ||
+        ["paid", "delivered", "shipped", "processing", "confirmed"].includes(
+          order.status,
         )
       ) {
         totalRevenue += orderRevenue;
       }
 
-      if (!['delivered', 'cancelled', 'refunded'].includes(order.status)) {
+      if (!["delivered", "cancelled", "refunded"].includes(order.status)) {
         pendingOrders += 1;
       }
     }
@@ -83,10 +83,10 @@ export async function getSellerStats(
         totalOrders: sellerOrders.length,
         pendingOrders,
         totalRevenue,
-        currency: 'ETB',
+        currency: "ETB",
         available_products: productList.filter((p) => p.is_available).length,
         low_stock_products: productList.filter(
-          (p) => p.stock > 0 && p.stock <= 5
+          (p) => p.stock > 0 && p.stock <= 5,
         ).length,
       },
     } satisfies ApiResponse);
@@ -98,31 +98,33 @@ export async function getSellerStats(
 export async function getSellerProducts(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
 
     const {
-      status = 'all',
+      status = "all",
       search,
       page = 1,
       limit = 20,
     } = req.query as Record<string, string | number>;
-    const { from, to, page: pageNum, limit: limitNum } = pagination(
-      Number(page),
-      Number(limit)
-    );
+    const {
+      from,
+      to,
+      page: pageNum,
+      limit: limitNum,
+    } = pagination(Number(page), Number(limit));
 
     let query = supabase
-      .from('products')
-      .select('*', { count: 'exact' })
-      .eq('seller_id', req.user.id)
-      .order('created_at', { ascending: false })
+      .from("products")
+      .select("*", { count: "exact" })
+      .eq("seller_id", req.user.id)
+      .order("created_at", { ascending: false })
       .range(from, to);
 
-    if (status === 'active') query = query.eq('is_active', true);
-    if (status === 'inactive') query = query.eq('is_active', false);
+    if (status === "active") query = query.eq("is_active", true);
+    if (status === "inactive") query = query.eq("is_active", false);
     if (search) {
       query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
     }
@@ -149,17 +151,17 @@ export async function getSellerProducts(
 export async function createSellerProduct(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
 
     const body = req.body as Record<string, unknown>;
     let images: string[] = [];
 
     if (Array.isArray(body.images)) {
       images = body.images as string[];
-    } else if (typeof body.images === 'string' && body.images) {
+    } else if (typeof body.images === "string" && body.images) {
       try {
         images = JSON.parse(body.images);
       } catch {
@@ -174,12 +176,12 @@ export async function createSellerProduct(
     }
 
     const { data, error } = await supabase
-      .from('products')
+      .from("products")
       .insert({
         name: body.name,
         description: body.description,
         price: Number(body.price),
-        currency: body.currency || 'ETB',
+        currency: body.currency || "ETB",
         category: body.category,
         sub_category: body.sub_category,
         stock: Number(body.stock ?? 0),
@@ -187,7 +189,7 @@ export async function createSellerProduct(
         is_available:
           body.is_available === undefined
             ? true
-            : body.is_available === true || body.is_available === 'true',
+            : body.is_available === true || body.is_available === "true",
         is_active: true,
         seller_id: req.user.id,
       })
@@ -195,7 +197,7 @@ export async function createSellerProduct(
       .single();
 
     if (error || !data) {
-      throw new AppError(error?.message || 'Failed to create product', 500);
+      throw new AppError(error?.message || "Failed to create product", 500);
     }
 
     try {
@@ -205,7 +207,7 @@ export async function createSellerProduct(
         sellerName:
           req.user.business_name ||
           req.user.seller_name ||
-          `${req.user.first_name} ${req.user.last_name || ''}`.trim(),
+          `${req.user.first_name} ${req.user.last_name || ""}`.trim(),
         price: Number(data.price),
         category: data.category,
       });
@@ -215,7 +217,7 @@ export async function createSellerProduct(
 
     res.status(201).json({
       success: true,
-      message: 'Product created',
+      message: "Product created",
       data,
     } satisfies ApiResponse);
   } catch (err) {
@@ -226,21 +228,21 @@ export async function createSellerProduct(
 export async function updateSellerProduct(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
     const { id } = req.params;
 
     const { data: existing } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', id)
+      .from("products")
+      .select("*")
+      .eq("id", id)
       .single();
 
-    if (!existing) throw new AppError('Product not found', 404);
-    if (existing.seller_id !== req.user.id && req.user.role !== 'admin') {
-      throw new AppError('Not authorized to update this product', 403);
+    if (!existing) throw new AppError("Product not found", 404);
+    if (existing.seller_id !== req.user.id && req.user.role !== "admin") {
+      throw new AppError("Not authorized to update this product", 403);
     }
 
     const body = { ...req.body } as Record<string, unknown>;
@@ -248,7 +250,7 @@ export async function updateSellerProduct(
 
     if (body.images !== undefined) {
       if (Array.isArray(body.images)) images = body.images as string[];
-      else if (typeof body.images === 'string') {
+      else if (typeof body.images === "string") {
         try {
           images = JSON.parse(body.images);
         } catch {
@@ -269,11 +271,11 @@ export async function updateSellerProduct(
     };
 
     for (const key of [
-      'name',
-      'description',
-      'category',
-      'sub_category',
-      'currency',
+      "name",
+      "description",
+      "category",
+      "sub_category",
+      "currency",
     ]) {
       if (body[key] !== undefined) updates[key] = body[key];
     }
@@ -281,26 +283,26 @@ export async function updateSellerProduct(
     if (body.stock !== undefined) updates.stock = Number(body.stock);
     if (body.is_available !== undefined) {
       updates.is_available =
-        body.is_available === true || body.is_available === 'true';
+        body.is_available === true || body.is_available === "true";
     }
     if (body.is_active !== undefined) {
-      updates.is_active = body.is_active === true || body.is_active === 'true';
+      updates.is_active = body.is_active === true || body.is_active === "true";
     }
 
     const { data, error } = await supabase
-      .from('products')
+      .from("products")
       .update(updates)
-      .eq('id', id)
+      .eq("id", id)
       .select()
       .single();
 
     if (error || !data) {
-      throw new AppError(error?.message || 'Failed to update product', 500);
+      throw new AppError(error?.message || "Failed to update product", 500);
     }
 
     res.status(200).json({
       success: true,
-      message: 'Product updated',
+      message: "Product updated",
       data,
     } satisfies ApiResponse);
   } catch (err) {
@@ -311,32 +313,32 @@ export async function updateSellerProduct(
 export async function deleteSellerProduct(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
     const { id } = req.params;
 
     const { data: existing } = await supabase
-      .from('products')
-      .select('seller_id')
-      .eq('id', id)
+      .from("products")
+      .select("seller_id")
+      .eq("id", id)
       .single();
 
-    if (!existing) throw new AppError('Product not found', 404);
-    if (existing.seller_id !== req.user.id && req.user.role !== 'admin') {
-      throw new AppError('Not authorized to delete this product', 403);
+    if (!existing) throw new AppError("Product not found", 404);
+    if (existing.seller_id !== req.user.id && req.user.role !== "admin") {
+      throw new AppError("Not authorized to delete this product", 403);
     }
 
     // Soft delete
     const { data, error } = await supabase
-      .from('products')
+      .from("products")
       .update({
         is_active: false,
         is_available: false,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', id)
+      .eq("id", id)
       .select()
       .single();
 
@@ -344,7 +346,7 @@ export async function deleteSellerProduct(
 
     res.status(200).json({
       success: true,
-      message: 'Product deactivated',
+      message: "Product deactivated",
       data,
     } satisfies ApiResponse);
   } catch (err) {
@@ -355,25 +357,26 @@ export async function deleteSellerProduct(
 export async function getSellerOrders(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
 
-    const { status, page = 1, limit = 20 } = req.query as Record<
-      string,
-      string | number
-    >;
+    const {
+      status,
+      page = 1,
+      limit = 20,
+    } = req.query as Record<string, string | number>;
     const pageNum = Number(page);
     const limitNum = Number(limit);
 
     let query = supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: false })
+      .from("orders")
+      .select("*")
+      .order("created_at", { ascending: false })
       .limit(500);
 
-    if (status) query = query.eq('status', status);
+    if (status) query = query.eq("status", status);
 
     const { data, error } = await query;
     if (error) throw new AppError(error.message, 500);
@@ -382,7 +385,7 @@ export async function getSellerOrders(
     const filtered = (data ?? []).filter(
       (order) =>
         Array.isArray(order.items) &&
-        order.items.some((item: OrderItem) => item.seller_id === sellerId)
+        order.items.some((item: OrderItem) => item.seller_id === sellerId),
     );
 
     const total = filtered.length;
@@ -390,7 +393,7 @@ export async function getSellerOrders(
     const mapped = filtered.slice(from, from + limitNum).map((order) => ({
       ...order,
       items: (order.items as OrderItem[]).filter(
-        (item) => item.seller_id === sellerId
+        (item) => item.seller_id === sellerId,
       ),
     }));
 
@@ -412,37 +415,38 @@ export async function getSellerOrders(
 export async function updateSellerOrderStatus(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
     const { id } = req.params;
     const { status } = req.body;
 
     const { data: order, error: fetchError } = await supabase
-      .from('orders')
-      .select('*, users(telegram_id, id)')
-      .eq('id', id)
+      .from("orders")
+      .select("*, users(telegram_id, id)")
+      .eq("id", id)
       .single();
 
-    if (fetchError || !order) throw new AppError('Order not found', 404);
+    if (fetchError || !order) throw new AppError("Order not found", 404);
 
-    const owns = Array.isArray(order.items) &&
+    const owns =
+      Array.isArray(order.items) &&
       order.items.some((item: OrderItem) => item.seller_id === req.user!.id);
 
-    if (!owns && req.user.role !== 'admin') {
-      throw new AppError('Not authorized to update this order', 403);
+    if (!owns && req.user.role !== "admin") {
+      throw new AppError("Not authorized to update this order", 403);
     }
 
     const { data, error } = await supabase
-      .from('orders')
+      .from("orders")
       .update({ status, updated_at: new Date().toISOString() })
-      .eq('id', id)
+      .eq("id", id)
       .select()
       .single();
 
     if (error || !data) {
-      throw new AppError(error?.message || 'Failed to update order', 500);
+      throw new AppError(error?.message || "Failed to update order", 500);
     }
 
     const user = order.users as { telegram_id: number; id: string } | null;
@@ -452,7 +456,7 @@ export async function updateSellerOrderStatus(
 
     res.status(200).json({
       success: true,
-      message: 'Order status updated',
+      message: "Order status updated",
       data,
     } satisfies ApiResponse);
   } catch (err) {
@@ -463,10 +467,10 @@ export async function updateSellerOrderStatus(
 export async function getSellerProfile(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
 
     res.status(200).json({
       success: true,
@@ -497,10 +501,10 @@ export async function getSellerProfile(
 export async function updateSellerProfile(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
 
     const updates: Record<string, unknown> = {
       ...req.body,
@@ -515,19 +519,19 @@ export async function updateSellerProfile(
     if (req.body.business_phone) updates.phone = req.body.business_phone;
 
     const { data, error } = await supabase
-      .from('users')
+      .from("users")
       .update(updates)
-      .eq('id', req.user.id)
+      .eq("id", req.user.id)
       .select()
       .single();
 
     if (error || !data) {
-      throw new AppError(error?.message || 'Failed to update profile', 500);
+      throw new AppError(error?.message || "Failed to update profile", 500);
     }
 
     res.status(200).json({
       success: true,
-      message: 'Seller profile updated',
+      message: "Seller profile updated",
       data,
     } satisfies ApiResponse);
   } catch (err) {
@@ -538,56 +542,56 @@ export async function updateSellerProfile(
 export async function applyAsSeller(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
 
-    if (req.user.role === 'seller' || req.user.seller_status === 'approved') {
-      throw new AppError('You are already an approved seller', 409);
+    if (req.user.role === "seller" || req.user.seller_status === "approved") {
+      throw new AppError("You are already an approved seller", 409);
     }
 
     const { data: existing } = await supabase
-      .from('seller_applications')
-      .select('*')
-      .eq('user_id', req.user.id)
-      .eq('status', 'pending')
+      .from("seller_applications")
+      .select("*")
+      .eq("user_id", req.user.id)
+      .eq("status", "pending")
       .maybeSingle();
 
     if (existing) {
-      throw new AppError('You already have a pending application', 409);
+      throw new AppError("You already have a pending application", 409);
     }
 
     const { business_name, business_description, phone, business_type } =
       req.body;
 
     const { data, error } = await supabase
-      .from('seller_applications')
+      .from("seller_applications")
       .insert({
         user_id: req.user.id,
         business_name,
         business_description,
         phone,
         business_type,
-        status: 'pending',
+        status: "pending",
       })
       .select()
       .single();
 
     if (error || !data) {
-      throw new AppError(error?.message || 'Failed to submit application', 500);
+      throw new AppError(error?.message || "Failed to submit application", 500);
     }
 
     await supabase
-      .from('users')
+      .from("users")
       .update({
-        seller_status: 'pending',
+        seller_status: "pending",
         updated_at: new Date().toISOString(),
       })
-      .eq('id', req.user.id);
+      .eq("id", req.user.id);
 
     const userName =
-      `${req.user.first_name} ${req.user.last_name || ''}`.trim();
+      `${req.user.first_name} ${req.user.last_name || ""}`.trim();
     try {
       await notifyNewSellerApplication({
         applicationId: data.id,
@@ -598,12 +602,12 @@ export async function applyAsSeller(
         phone,
       });
     } catch (e) {
-      logger.error(`Seller application saved but notify failed: ${e}`);
+      logger.error(`Seller application notify failed: ${e}`);
     }
 
     res.status(201).json({
       success: true,
-      message: 'Seller application submitted',
+      message: "Seller application submitted",
       data,
     } satisfies ApiResponse);
   } catch (err) {
@@ -614,23 +618,23 @@ export async function applyAsSeller(
 export async function getApplicationStatus(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw new AppError('Not authenticated', 401);
+    if (!req.user) throw new AppError("Not authenticated", 401);
 
     const { data: application } = await supabase
-      .from('seller_applications')
-      .select('*')
-      .eq('user_id', req.user.id)
-      .order('created_at', { ascending: false })
+      .from("seller_applications")
+      .select("*")
+      .eq("user_id", req.user.id)
+      .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     res.status(200).json({
       success: true,
       data: {
-        seller_status: req.user.seller_status || 'none',
+        seller_status: req.user.seller_status || "none",
         role: req.user.role,
         is_seller: req.user.is_seller,
         application: application ?? null,

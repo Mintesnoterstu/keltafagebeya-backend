@@ -12,9 +12,7 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
-/**
- * Core Telegram sender — never throws.
- */
+/** Core sender — never throws. */
 export async function sendTelegramNotification(
   chatId: string | number,
   message: string
@@ -52,8 +50,7 @@ export async function sendTelegramMessage(
   chatId: string | number,
   text: string
 ): Promise<boolean> {
-  const result = await sendTelegramNotification(chatId, text);
-  return result.ok;
+  return (await sendTelegramNotification(chatId, text)).ok;
 }
 
 export async function notifyAdmin(text: string): Promise<boolean> {
@@ -92,9 +89,7 @@ export async function createInAppNotification(
       is_read: false,
       data: data ?? null,
     });
-    if (error) {
-      logger.error(`In-app notification failed: ${error.message}`);
-    }
+    if (error) logger.error(`In-app notification failed: ${error.message}`);
   } catch (err) {
     logger.error(`In-app notification exception: ${err}`);
   }
@@ -292,19 +287,4 @@ export async function notifySellerNewOrder(
     telegramId,
     `🛒 New order <code>${orderId.slice(0, 8)}</code> includes <b>${itemCount}</b> of your product(s).`
   );
-}
-
-/** @deprecated use notifyNewSellerApplication(params) */
-export async function notifyNewSellerApplicationLegacy(
-  applicationId: string,
-  businessName: string,
-  userName: string,
-  businessType?: string
-): Promise<void> {
-  await notifyNewSellerApplication({
-    applicationId,
-    applicantName: userName,
-    businessName,
-    businessType,
-  });
 }

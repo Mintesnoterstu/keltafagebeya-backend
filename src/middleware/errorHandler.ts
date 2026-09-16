@@ -13,17 +13,16 @@ export function errorHandler(
   _next: NextFunction
 ): void {
   if (err instanceof AppError) {
-    const body: ApiResponse = {
+    res.status(err.statusCode).json({
       success: false,
       error: err.message,
       message: err.message,
-    };
-    res.status(err.statusCode).json(body);
+    } satisfies ApiResponse);
     return;
   }
 
   if (err instanceof ZodError) {
-    const body: ApiResponse = {
+    res.status(400).json({
       success: false,
       error: 'Validation failed',
       message: 'Validation failed',
@@ -31,34 +30,30 @@ export function errorHandler(
         path: e.path.join('.'),
         message: e.message,
       })),
-    };
-    res.status(400).json(body);
+    } satisfies ApiResponse);
     return;
   }
 
   logger.error(err.stack || err.message);
 
-  // Fire-and-forget admin alert for unexpected 500s
   void notifySystemError({
     endpoint: `${req.method} ${req.originalUrl}`,
     error: err.message || 'Unknown error',
   });
 
-  const body: ApiResponse = {
+  res.status(500).json({
     success: false,
     error: env.isDev ? err.message : 'Internal server error',
     message: env.isDev ? err.message : 'Internal server error',
-  };
-  res.status(500).json(body);
+  } satisfies ApiResponse);
 }
 
 export function notFoundHandler(req: Request, res: Response): void {
-  const body: ApiResponse = {
+  res.status(404).json({
     success: false,
     error: `Route ${req.method} ${req.originalUrl} not found`,
     message: `Route ${req.method} ${req.originalUrl} not found`,
-  };
-  res.status(404).json(body);
+  } satisfies ApiResponse);
 }
 
 type RequestSource = 'body' | 'query' | 'params';
