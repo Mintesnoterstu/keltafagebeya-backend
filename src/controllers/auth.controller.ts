@@ -40,21 +40,39 @@ export async function telegramAuth(
     let user: User;
 
     if (existing) {
-      const { data: updated, error } = await supabase
+      const updatePayload: Record<string, unknown> = {
+        first_name: telegramUser.first_name,
+        last_name: telegramUser.last_name ?? null,
+        username: telegramUser.username ?? null,
+        photo_url: telegramUser.photo_url ?? existing.photo_url,
+      };
+
+      let { data: updated, error } = await supabase
         .from("users")
         .update({
-          first_name: telegramUser.first_name,
-          last_name: telegramUser.last_name ?? null,
-          username: telegramUser.username ?? null,
-          photo_url: telegramUser.photo_url ?? existing.photo_url,
+          ...updatePayload,
           updated_at: new Date().toISOString(),
         })
         .eq("id", existing.id)
         .select()
         .single();
 
+      // Schema may be missing updated_at — retry without it
+      if (error?.message?.includes("updated_at")) {
+        logger.warn(`users.updated_at missing, retrying update: ${error.message}`);
+        const retry = await supabase
+          .from("users")
+          .update(updatePayload)
+          .eq("id", existing.id)
+          .select()
+          .single();
+        updated = retry.data;
+        error = retry.error;
+      }
+
       if (error || !updated) {
-        throw new AppError("Failed to update user", 500);
+        logger.error(`User update error: ${error?.message}`);
+        throw new AppError(error?.message || "Failed to update user", 500);
       }
       user = updated as User;
     } else {

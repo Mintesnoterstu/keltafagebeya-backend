@@ -42,7 +42,7 @@ export async function authenticate(
     if (isEnvAdmin(user) && user.role !== 'admin') {
       const { data: promoted } = await supabase
         .from('users')
-        .update({ role: 'admin', updated_at: new Date().toISOString() })
+        .update({ role: 'admin' })
         .eq('id', user.id)
         .select()
         .single();

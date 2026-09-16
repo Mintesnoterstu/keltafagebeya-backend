@@ -81,6 +81,14 @@ ALTER TABLE products
 
 UPDATE products SET is_active = true WHERE is_active IS NULL;
 
+-- 6. Timestamps (required — login fails without users.updated_at)
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+UPDATE users SET created_at = COALESCE(created_at, NOW());
+UPDATE users SET updated_at = COALESCE(updated_at, NOW());
+
 -- 5. Optional: promote your Telegram admin user (replace with your telegram_id)
 -- UPDATE users SET role = 'admin' WHERE telegram_id = 8118358536;
 
