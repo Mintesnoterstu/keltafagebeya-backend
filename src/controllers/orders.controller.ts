@@ -18,7 +18,7 @@ export async function createOrder(
   try {
     if (!req.user) throw new AppError('Not authenticated', 401);
 
-    const { payment_method, shipping_address, notes } = req.body;
+    const { payment_method, shipping_address, notes, delivery_fee } = req.body;
 
     const { data: cartItems, error: cartError } = await supabase
       .from('cart_items')
@@ -56,24 +56,75 @@ export async function createOrder(
       currency = product.currency || 'ETB';
     }
 
-    const { data: order, error: orderError } = await supabase
+    const deliveryFee = Number(delivery_fee || 0);
+    const grandTotal = totalAmount + deliveryFee;
+
+    const orderRow: Record<string, unknown> = {
+      user_id: req.user.id,
+      items: orderItems,
+      total_amount: grandTotal,
+      currency,
+      status: 'pending',
+      payment_method,
+      payment_status: payment_method === 'cash' ? 'pending' : 'pending',
+      shipping_address: shipping_address ?? null,
+      notes: notes ?? null,
+    };
+
+    // Support DBs that use `total` / `address` column names
+    orderRow.total = grandTotal;
+    orderRow.address = shipping_address ?? null;
+
+    let { data: order, error: orderError } = await supabase
       .from('orders')
-      .insert({
-        user_id: req.user.id,
-        items: orderItems,
-        total_amount: totalAmount,
-        currency,
-        status: 'pending',
-        payment_method,
-        payment_status: 'pending',
-        shipping_address: shipping_address ?? null,
-        notes: notes ?? null,
-      })
+      .insert(orderRow)
       .select()
       .single();
 
+    if (orderError) {
+      logger.warn(`Order insert retry with core columns only: ${orderError.message}`);
+      const retry = await supabase
+        .from('orders')
+        .insert({
+          user_id: req.user.id,
+          items: orderItems,
+          total_amount: grandTotal,
+          status: 'pending',
+          payment_method,
+          payment_status: 'pending',
+          shipping_address: shipping_address ?? null,
+        })
+        .select()
+        .single();
+      order = retry.data;
+      orderError = retry.error;
+    }
+
     if (orderError || !order) {
-      throw new AppError(orderError?.message || 'Failed to create order', 500);
+      // Last fallback for schemas using total + address
+      const retry2 = await supabase
+        .from('orders')
+        .insert({
+          user_id: req.user.id,
+          items: orderItems,
+          total: grandTotal,
+          status: 'pending',
+          payment_method,
+          payment_status: 'pending',
+          address: shipping_address ?? null,
+        })
+        .select()
+        .single();
+
+      if (retry2.error || !retry2.data) {
+        throw new AppError(
+          orderError?.message ||
+            retry2.error?.message ||
+            'Failed to create order',
+          500
+        );
+      }
+      order = retry2.data;
     }
 
     // Decrement stock
@@ -94,7 +145,7 @@ export async function createOrder(
     try {
       await notifyNewOrder({
         orderId: order.id,
-        total: totalAmount,
+        total: grandTotal,
         currency,
         customerName: buyerName,
         username: req.user.username,

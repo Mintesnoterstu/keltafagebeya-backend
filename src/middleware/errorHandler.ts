@@ -22,14 +22,20 @@ export function errorHandler(
   }
 
   if (err instanceof ZodError) {
+    const details = err.errors.map((e) => ({
+      path: e.path.join('.') || '(root)',
+      message: e.message,
+    }));
+    const first = details[0];
+    const summary = first
+      ? `${first.path}: ${first.message}`
+      : 'Validation failed';
+
     res.status(400).json({
       success: false,
       error: 'Validation failed',
-      message: 'Validation failed',
-      data: err.errors.map((e) => ({
-        path: e.path.join('.'),
-        message: e.message,
-      })),
+      message: summary,
+      data: details,
     } satisfies ApiResponse);
     return;
   }
