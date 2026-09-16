@@ -144,7 +144,7 @@ export async function telegramAuth(
       role: user.role,
     };
 
-    const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: '30d' });
+    const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: '7d' });
 
     res.status(200).json({
       success: true,
