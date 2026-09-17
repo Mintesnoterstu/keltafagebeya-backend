@@ -158,12 +158,29 @@ export async function createProduct(
   try {
     if (!req.user) throw new AppError('Not authenticated', 401);
 
+    const body = req.body as Record<string, unknown>;
+    const images = Array.isArray(body.images)
+      ? (body.images as string[])
+      : typeof body.images === 'string' && body.images
+        ? [body.images]
+        : [];
+
+    const insertRow = {
+      name: body.name || body.title,
+      description: body.description ?? '',
+      price: Number(body.price),
+      category: body.category,
+      sub_category: body.sub_category || body.subCategory || null,
+      stock: Number(body.stock ?? body.quantity ?? 0),
+      images,
+      is_available: body.is_available !== false,
+      is_active: true,
+      seller_id: req.user.id,
+    };
+
     const { data, error } = await supabase
       .from('products')
-      .insert({
-        ...req.body,
-        seller_id: req.user.id,
-      })
+      .insert(insertRow)
       .select()
       .single();
 
@@ -171,12 +188,12 @@ export async function createProduct(
       throw new AppError(error?.message || 'Failed to create product', 500);
     }
 
-    const body: ApiResponse = {
+    const response: ApiResponse = {
       success: true,
       message: 'Product created',
       data,
     };
-    res.status(201).json(body);
+    res.status(201).json(response);
   } catch (err) {
     next(err);
   }

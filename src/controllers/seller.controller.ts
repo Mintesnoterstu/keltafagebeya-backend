@@ -175,26 +175,54 @@ export async function createSellerProduct(
       images = [...images, ...uploaded];
     }
 
-    const { data, error } = await supabase
+    // Optional single URL from admin form "(optional URL)" + Add
+    for (const key of ["image_url", "imageUrl", "url"]) {
+      const extra = body[key];
+      if (typeof extra === "string" && extra.trim()) {
+        images.push(extra.trim());
+      }
+    }
+
+    // Only columns that exist on the live products table (no currency)
+    const insertRow: Record<string, unknown> = {
+      name: body.name || body.title,
+      description: body.description ?? "",
+      price: Number(body.price),
+      category: body.category,
+      sub_category: body.sub_category || body.subCategory || "Other",
+      stock: Number(body.stock ?? body.quantity ?? 0),
+      images,
+      is_available:
+        body.is_available === undefined
+          ? true
+          : body.is_available === true || body.is_available === "true",
+      is_active: true,
+      seller_id: req.user.id,
+    };
+
+    let { data, error } = await supabase
       .from("products")
-      .insert({
-        name: body.name,
-        description: body.description,
-        price: Number(body.price),
-        currency: body.currency || "ETB",
-        category: body.category,
-        sub_category: body.sub_category,
-        stock: Number(body.stock ?? 0),
-        images,
-        is_available:
-          body.is_available === undefined
-            ? true
-            : body.is_available === true || body.is_available === "true",
-        is_active: true,
-        seller_id: req.user.id,
-      })
+      .insert(insertRow)
       .select()
       .single();
+
+    // Retry without optional columns if schema is leaner
+    if (error) {
+      logger.warn(`Product insert retry without optional cols: ${error.message}`);
+      const lean = {
+        name: insertRow.name,
+        description: insertRow.description,
+        price: insertRow.price,
+        category: insertRow.category,
+        sub_category: insertRow.sub_category,
+        stock: insertRow.stock,
+        images,
+        seller_id: req.user.id,
+      };
+      const retry = await supabase.from("products").insert(lean).select().single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error || !data) {
       throw new AppError(error?.message || "Failed to create product", 500);
@@ -270,14 +298,17 @@ export async function updateSellerProduct(
       images,
     };
 
-    for (const key of [
-      "name",
-      "description",
-      "category",
-      "sub_category",
-      "currency",
-    ]) {
+    for (const key of ["name", "description", "category", "sub_category"]) {
       if (body[key] !== undefined) updates[key] = body[key];
+    }
+    if (body.subCategory !== undefined) updates.sub_category = body.subCategory;
+
+    for (const key of ["image_url", "imageUrl", "url"]) {
+      const extra = body[key];
+      if (typeof extra === "string" && extra.trim()) {
+        images = [...images, extra.trim()];
+        updates.images = images;
+      }
     }
     if (body.price !== undefined) updates.price = Number(body.price);
     if (body.stock !== undefined) updates.stock = Number(body.stock);

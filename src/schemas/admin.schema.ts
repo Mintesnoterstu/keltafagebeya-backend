@@ -51,13 +51,17 @@ export const sellerApplicationSchema = z.object({
 });
 
 export const sellerProductCreateSchema = z.object({
-  name: z.string().min(3).max(200),
+  name: z.string().min(1).max(200).optional(),
+  title: z.string().min(1).max(200).optional(),
   description: z.string().max(5000).optional().default(''),
   price: z.coerce.number().positive(),
-  currency: z.string().optional().default('ETB'),
+  // Accepted from clients but NOT written to DB (column may not exist)
+  currency: z.string().optional(),
   category: z.string().min(1),
   sub_category: z.string().optional().default('Other'),
-  stock: z.coerce.number().int().min(0).default(0),
+  subCategory: z.string().optional(),
+  stock: z.coerce.number().int().min(0).optional(),
+  quantity: z.coerce.number().int().min(0).optional(),
   images: z
     .preprocess((val) => {
       if (typeof val === 'string') {
@@ -70,12 +74,23 @@ export const sellerProductCreateSchema = z.object({
       return val ?? [];
     }, z.array(z.string()).optional())
     .default([]),
+  image_url: z.string().optional(),
+  imageUrl: z.string().optional(),
+  url: z.string().optional(),
   is_available: z
     .union([z.boolean(), z.enum(['true', 'false'])])
     .optional()
     .transform((v) =>
       v === undefined ? true : v === true || v === 'true'
     ),
+}).superRefine((val, ctx) => {
+  if (!val.name && !val.title) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'name or title is required',
+      path: ['name'],
+    });
+  }
 });
 
 export const sellerProductUpdateSchema = sellerProductCreateSchema.partial();
