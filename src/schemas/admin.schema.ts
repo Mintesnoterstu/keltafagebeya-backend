@@ -50,7 +50,7 @@ export const sellerApplicationSchema = z.object({
   business_type: z.enum(['individual', 'small_business', 'company']),
 });
 
-export const sellerProductCreateSchema = z.object({
+const sellerProductFieldsSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(5000).optional().default(''),
@@ -83,17 +83,21 @@ export const sellerProductCreateSchema = z.object({
     .transform((v) =>
       v === undefined ? true : v === true || v === 'true'
     ),
-}).superRefine((val, ctx) => {
-  if (!val.name && !val.title) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'name or title is required',
-      path: ['name'],
-    });
-  }
 });
 
-export const sellerProductUpdateSchema = sellerProductCreateSchema.partial();
+export const sellerProductCreateSchema = sellerProductFieldsSchema.superRefine(
+  (val, ctx) => {
+    if (!val.name && !val.title) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'name or title is required',
+        path: ['name'],
+      });
+    }
+  }
+);
+
+export const sellerProductUpdateSchema = sellerProductFieldsSchema.partial();
 
 export const sellerOrderStatusSchema = z.object({
   status: z.enum(['confirmed', 'processing', 'shipped', 'delivered', 'cancelled']),
