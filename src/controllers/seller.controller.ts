@@ -192,17 +192,16 @@ export async function createSellerProduct(
       sub_category: body.sub_category || body.subCategory || "Other",
       stock: Number(body.stock ?? body.quantity ?? 0),
       images,
-      is_available:
-        body.is_available === undefined
-          ? true
-          : body.is_available === true || body.is_available === "true",
-      is_active: true,
       seller_id: req.user.id,
     };
 
     let { data, error } = await supabase
       .from("products")
-      .insert(insertRow)
+      .insert({
+        ...insertRow,
+        is_available: true,
+        is_active: true,
+      })
       .select()
       .single();
 
