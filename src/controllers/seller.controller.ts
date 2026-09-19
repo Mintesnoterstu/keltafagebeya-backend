@@ -25,11 +25,18 @@ export async function getSellerStats(
     if (!req.user) throw new AppError("Not authenticated", 401);
 
     const sellerId = req.user.id;
+    const isAdmin =
+      req.user.role === "admin" || req.user.isAdmin === true;
 
-    const { data: products, error: productsError } = await supabase
+    let productsQuery = supabase
       .from("products")
-      .select("id, stock, is_available, is_active, price")
-      .eq("seller_id", sellerId);
+      .select("id, stock, is_available, is_active, price");
+
+    if (!isAdmin) {
+      productsQuery = productsQuery.eq("seller_id", sellerId);
+    }
+
+    const { data: products, error: productsError } = await productsQuery;
 
     if (productsError) throw new AppError(productsError.message, 500);
 
@@ -43,19 +50,23 @@ export async function getSellerStats(
 
     if (ordersError) throw new AppError(ordersError.message, 500);
 
-    const sellerOrders = (orders ?? []).filter(
-      (order) =>
-        Array.isArray(order.items) &&
-        order.items.some((item: OrderItem) => item.seller_id === sellerId),
-    );
+    const sellerOrders = (orders ?? []).filter((order) => {
+      if (!Array.isArray(order.items)) return false;
+      if (isAdmin) return true;
+      return order.items.some(
+        (item: OrderItem) => item.seller_id === sellerId,
+      );
+    });
 
     let totalRevenue = 0;
     let pendingOrders = 0;
 
     for (const order of sellerOrders) {
-      const sellerItems = (order.items as OrderItem[]).filter(
-        (item) => item.seller_id === sellerId,
-      );
+      const sellerItems = isAdmin
+        ? (order.items as OrderItem[])
+        : (order.items as OrderItem[]).filter(
+            (item) => item.seller_id === sellerId,
+          );
       const orderRevenue = sellerItems.reduce(
         (sum, item) => sum + item.price * item.quantity,
         0,
@@ -116,12 +127,20 @@ export async function getSellerProducts(
       limit: limitNum,
     } = pagination(Number(page), Number(limit));
 
+    const isAdmin =
+      req.user.role === "admin" || req.user.isAdmin === true;
+
+    // Admins manage the full catalog (seed rows often have seller_id null).
+    // Sellers only see their own products.
     let query = supabase
       .from("products")
       .select("*", { count: "exact" })
-      .eq("seller_id", req.user.id)
       .order("created_at", { ascending: false })
       .range(from, to);
+
+    if (!isAdmin) {
+      query = query.eq("seller_id", req.user.id);
+    }
 
     if (status === "active") query = query.eq("is_active", true);
     if (status === "inactive") query = query.eq("is_active", false);
