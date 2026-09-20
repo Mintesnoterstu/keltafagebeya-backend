@@ -49,4 +49,10 @@ router.post(
   ordersController.confirmOrderReceived
 );
 
+router.put(
+  '/:id/confirm-delivery',
+  validate(orderIdSchema, 'params'),
+  ordersController.confirmOrderReceived
+);
+
 export default router;

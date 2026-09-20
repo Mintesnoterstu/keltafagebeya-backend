@@ -77,7 +77,7 @@ export function createApp(): Application {
       success: true,
       message: 'Welcome to KeltaFagebeya API (ክልታፋገብያ)',
       version: '1.0.0',
-      build: 'order-status-apis-2026-09-20',
+      build: 'seller-feedback-reviews-2026-09-20',
       docs: '/api/health',
       testNotification: '/api/test-notification',
     });

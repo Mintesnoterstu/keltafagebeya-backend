@@ -127,20 +127,13 @@ export async function getSellerProducts(
       limit: limitNum,
     } = pagination(Number(page), Number(limit));
 
-    const isAdmin =
-      req.user.role === "admin" || req.user.isAdmin === true;
-
-    // Admins manage the full catalog (seed rows often have seller_id null).
-    // Sellers only see their own products.
+    // Seller dashboard is isolated: only this seller's products
     let query = supabase
       .from("products")
       .select("*", { count: "exact" })
+      .eq("seller_id", req.user.id)
       .order("created_at", { ascending: false })
       .range(from, to);
-
-    if (!isAdmin) {
-      query = query.eq("seller_id", req.user.id);
-    }
 
     if (status === "active") query = query.eq("is_active", true);
     if (status === "inactive") query = query.eq("is_active", false);
@@ -287,11 +280,7 @@ export async function updateSellerProduct(
       .single();
 
     if (!existing) throw new AppError("Product not found", 404);
-    if (existing.seller_id !== req.user.id && req.user.role !== "admin") {
-      throw new AppError("Not authorized to update this product", 403);
-    }
-    // Sellers may only edit products they created (seller_id must match)
-    if (req.user.role !== "admin" && !existing.seller_id) {
+    if (existing.seller_id !== req.user.id) {
       throw new AppError("Not authorized to update this product", 403);
     }
 
@@ -379,7 +368,7 @@ export async function deleteSellerProduct(
       .single();
 
     if (!existing) throw new AppError("Product not found", 404);
-    if (existing.seller_id !== req.user.id && req.user.role !== "admin") {
+    if (existing.seller_id !== req.user.id) {
       throw new AppError("Not authorized to delete this product", 403);
     }
 

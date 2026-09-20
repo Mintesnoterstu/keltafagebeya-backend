@@ -7,6 +7,7 @@ import {
   notifyNewOrder,
   notifyOrderStatusChange,
   notifySellerNewOrder,
+  notifySellerDeliveryConfirmed,
   sendTelegramNotification,
 } from '../services/telegram.service';
 import { logger } from '../config/logger';
@@ -558,17 +559,27 @@ export async function confirmOrderReceived(
       .single();
 
     if (findError || !existing) throw new AppError('Order not found', 404);
-    if (existing.user_id !== req.user.id && req.user.role !== 'admin') {
+    if (existing.user_id !== req.user.id) {
       throw new AppError('Not authorized', 403);
     }
 
+    const status = String(existing.status || '').toLowerCase();
+    if (status !== 'shipped' && status !== 'delivered') {
+      throw new AppError(
+        'Only shipped orders can be confirmed as delivered',
+        400
+      );
+    }
+
+    const now = new Date().toISOString();
     const updates: Record<string, unknown> = {
       status: 'delivered',
+      delivered_confirmed_at: now,
       payment_status:
         existing.payment_method === 'cod' || existing.payment_method === 'cash'
           ? 'paid'
           : existing.payment_status || 'paid',
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     };
 
     let { data, error } = await supabase
@@ -579,13 +590,13 @@ export async function confirmOrderReceived(
       .single();
 
     if (error) {
-      const lean = {
-        status: 'delivered',
-        payment_status: updates.payment_status,
-      };
+      logger.warn(`Delivery confirm retry without extra columns: ${error.message}`);
       const retry = await supabase
         .from('orders')
-        .update(lean)
+        .update({
+          status: 'delivered',
+          delivered_confirmed_at: now,
+        })
         .eq('id', id)
         .select()
         .single();
@@ -593,17 +604,51 @@ export async function confirmOrderReceived(
       error = retry.error;
     }
 
+    if (error) {
+      const retry2 = await supabase
+        .from('orders')
+        .update({ status: 'delivered' })
+        .eq('id', id)
+        .select()
+        .single();
+      data = retry2.data;
+      error = retry2.error;
+    }
+
     if (error || !data) {
       throw new AppError(error?.message || 'Failed to confirm order', 500);
+    }
+
+    const sellerIds = [
+      ...new Set(
+        ((existing.items as OrderItem[]) || [])
+          .map((item) => item.seller_id)
+          .filter(Boolean)
+      ),
+    ];
+
+    for (const sellerId of sellerIds) {
+      const { data: seller } = await supabase
+        .from('users')
+        .select('telegram_id')
+        .eq('id', sellerId)
+        .maybeSingle();
+      if (seller?.telegram_id) {
+        try {
+          await notifySellerDeliveryConfirmed(seller.telegram_id, id);
+        } catch (e) {
+          logger.error(`Seller delivery confirm notify failed: ${e}`);
+        }
+      }
     }
 
     try {
       await sendTelegramNotification(
         env.TELEGRAM_ADMIN_CHAT_ID,
-        `✅ Customer confirmed receipt\nOrder: <code>${id.slice(0, 8)}</code>\nBuyer: ${req.user.first_name}`
+        `✅ Customer confirmed delivery for order #<code>${id.slice(0, 8)}</code>\nBuyer: ${req.user.first_name}`
       );
     } catch (e) {
-      logger.error(`Confirm-received admin notify failed: ${e}`);
+      logger.error(`Confirm-delivery admin notify failed: ${e}`);
     }
 
     res.status(200).json({

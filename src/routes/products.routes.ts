@@ -7,7 +7,9 @@ import {
   productQuerySchema,
   productIdSchema,
 } from '../schemas/products.schema';
+import { createReviewSchema } from '../schemas/feedback.schema';
 import * as productsController from '../controllers/products.controller';
+import * as reviewsController from '../controllers/reviews.controller';
 
 const router = Router();
 
@@ -25,6 +27,20 @@ router.get(
   '/:id',
   validate(productIdSchema, 'params'),
   productsController.getProductById
+);
+
+router.get(
+  '/:id/reviews',
+  validate(productIdSchema, 'params'),
+  reviewsController.getProductReviews
+);
+
+router.post(
+  '/:id/reviews',
+  authenticate,
+  validate(productIdSchema, 'params'),
+  validate(createReviewSchema),
+  reviewsController.createProductReview
 );
 
 router.post(

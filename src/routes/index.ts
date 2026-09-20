@@ -8,6 +8,7 @@ import paymentsRoutes from './payments.routes';
 import sellerRoutes from './seller.routes';
 import adminRoutes from './admin.routes';
 import uploadRoutes from './upload.routes';
+import feedbackRoutes from './feedback.routes';
 import { sendTelegramNotification } from '../services/telegram.service';
 import { env } from '../config/env';
 
@@ -22,13 +23,14 @@ router.use('/payments', paymentsRoutes);
 router.use('/seller', sellerRoutes);
 router.use('/admin', adminRoutes);
 router.use('/upload', uploadRoutes);
+router.use('/feedback', feedbackRoutes);
 
 router.get('/health', (_req, res) => {
   res.status(200).json({
     success: true,
     message: 'KeltaFagebeya API is healthy',
     version: '1.0.0',
-    build: 'order-status-apis-2026-09-20',
+    build: 'seller-feedback-reviews-2026-09-20',
     timestamp: new Date().toISOString(),
   });
 });

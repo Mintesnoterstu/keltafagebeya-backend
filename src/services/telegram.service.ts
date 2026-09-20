@@ -288,3 +288,47 @@ export async function notifySellerNewOrder(
     `🛒 New order <code>${orderId.slice(0, 8)}</code> includes <b>${itemCount}</b> of your product(s).`
   );
 }
+
+export async function notifySellerDeliveryConfirmed(
+  telegramId: number,
+  orderId: string
+): Promise<void> {
+  await notifyUser(
+    telegramId,
+    `✅ Customer confirmed delivery for order #<code>${orderId.slice(0, 8)}</code>`
+  );
+}
+
+export async function notifyAdminNewFeedback(params: {
+  customerName: string;
+  username?: string | null;
+  category: string;
+  message: string;
+  rating?: number | null;
+}): Promise<void> {
+  const handle = params.username ? `@${escapeHtml(params.username)}` : '—';
+  await notifyAdmin(
+    `📩 <b>NEW FEEDBACK</b>\n` +
+      `From: ${escapeHtml(params.customerName)} (${handle})\n` +
+      `Category: ${escapeHtml(params.category)}\n` +
+      `Message: ${escapeHtml(params.message)}\n` +
+      `Rating: ${params.rating ?? '—'}`
+  );
+}
+
+export async function notifyAdminNewReview(params: {
+  customerName: string;
+  username?: string | null;
+  productName: string;
+  rating: number;
+  comment?: string | null;
+}): Promise<void> {
+  const handle = params.username ? `@${escapeHtml(params.username)}` : '—';
+  await notifyAdmin(
+    `⭐ <b>NEW PRODUCT REVIEW</b>\n` +
+      `From: ${escapeHtml(params.customerName)} (${handle})\n` +
+      `Product: ${escapeHtml(params.productName)}\n` +
+      `Rating: ${params.rating}/5\n` +
+      `Comment: ${escapeHtml(params.comment || '—')}`
+  );
+}
