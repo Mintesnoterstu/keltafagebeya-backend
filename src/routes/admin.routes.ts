@@ -7,6 +7,9 @@ import {
   adminListQuerySchema,
   adminRejectSellerSchema,
   idParamSchema,
+  orderIdParamSchema,
+  adminOrderStatusSchema,
+  sellerPermissionsSchema,
 } from '../schemas/admin.schema';
 import * as adminController from '../controllers/admin.controller';
 
@@ -77,8 +80,32 @@ router.get(
 );
 router.get(
   '/orders/:id',
-  validate(idParamSchema, 'params'),
+  validate(orderIdParamSchema, 'params'),
   adminController.getAdminOrderById
+);
+router.patch(
+  '/orders/:id',
+  validate(orderIdParamSchema, 'params'),
+  validate(adminOrderStatusSchema),
+  adminController.updateAdminOrderStatus
+);
+router.put(
+  '/orders/:id',
+  validate(orderIdParamSchema, 'params'),
+  validate(adminOrderStatusSchema),
+  adminController.updateAdminOrderStatus
+);
+router.put(
+  '/sellers/:id/permissions',
+  validate(idParamSchema, 'params'),
+  validate(sellerPermissionsSchema),
+  adminController.updateSellerPermissions
+);
+router.patch(
+  '/sellers/:id/permissions',
+  validate(idParamSchema, 'params'),
+  validate(sellerPermissionsSchema),
+  adminController.updateSellerPermissions
 );
 
 export default router;

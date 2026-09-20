@@ -246,6 +246,9 @@ export async function updateProduct(
     if (existing.seller_id !== req.user.id && req.user.role !== 'admin') {
       throw new AppError('Not authorized to update this product', 403);
     }
+    if (req.user.role !== 'admin' && !existing.seller_id) {
+      throw new AppError('Not authorized to update this product', 403);
+    }
 
     const body = { ...(req.body as Record<string, unknown>) };
     delete body.currency;

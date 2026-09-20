@@ -8,6 +8,7 @@ import {
   notifySellerApplicationDecision,
 } from '../services/telegram.service';
 import { logger } from '../config/logger';
+import { normalizeOrderForClient } from '../utils/normalizeOrder';
 
 function pagination(page: number, limit: number) {
   const from = (page - 1) * limit;
@@ -590,7 +591,19 @@ export async function approveSeller(
         seller_name: application.business_name,
         seller_bio: application.business_description,
         phone: application.phone,
+        // Admin must explicitly enable these later
+        receive_orders: false,
+        receive_requests: false,
         updated_at: now,
+      },
+      {
+        role: 'seller',
+        is_seller: true,
+        seller_status: 'approved',
+        business_name: application.business_name,
+        phone: application.phone,
+        receive_orders: false,
+        receive_requests: false,
       },
       {
         role: 'seller',
@@ -751,7 +764,7 @@ export async function getAdminOrders(
     let query = supabase
       .from('orders')
       .select(
-        '*, users!orders_user_id_fkey(id, first_name, last_name, username, telegram_id)'
+        '*, users!orders_user_id_fkey(id, first_name, last_name, username, telegram_id, phone)'
       )
       .order('created_at', { ascending: false })
       .limit(1000);
@@ -760,55 +773,73 @@ export async function getAdminOrders(
     if (date_from) query = query.gte('created_at', date_from);
     if (date_to) query = query.lte('created_at', date_to);
 
+    let rows: Record<string, unknown>[] = [];
     const { data, error } = await query;
 
     if (error) {
+      logger.warn(`Admin orders join failed: ${error.message}`);
       const fallback = await supabase
         .from('orders')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(1000);
       if (fallback.error) throw new AppError(fallback.error.message, 500);
-
-      let filtered = fallback.data ?? [];
-      if (seller_id) {
-        filtered = filtered.filter(
-          (o) =>
-            Array.isArray(o.items) &&
-            o.items.some((item: OrderItem) => item.seller_id === seller_id)
-        );
-      }
-
-      const total = filtered.length;
-      const from = (pageNum - 1) * limitNum;
-      res.status(200).json({
-        success: true,
-        data: filtered.slice(from, from + limitNum),
-        meta: {
-          page: pageNum,
-          limit: limitNum,
-          total,
-          totalPages: Math.ceil(total / limitNum),
-        },
-      } satisfies ApiResponse);
-      return;
+      rows = (fallback.data ?? []) as Record<string, unknown>[];
+    } else {
+      rows = (data ?? []) as Record<string, unknown>[];
     }
 
-    let filtered = data ?? [];
     if (seller_id) {
-      filtered = filtered.filter(
+      rows = rows.filter(
         (o) =>
           Array.isArray(o.items) &&
-          o.items.some((item: OrderItem) => item.seller_id === seller_id)
+          (o.items as OrderItem[]).some((item) => item.seller_id === seller_id)
       );
     }
 
-    const total = filtered.length;
+    // Enrich missing customer joins
+    const missingUserIds = [
+      ...new Set(
+        rows
+          .filter((o) => !o.users && o.user_id)
+          .map((o) => String(o.user_id))
+      ),
+    ];
+    const customerMap = new Map<string, Record<string, unknown>>();
+    if (missingUserIds.length) {
+      const { data: customers } = await supabase
+        .from('users')
+        .select('id, first_name, last_name, username, telegram_id, phone')
+        .in('id', missingUserIds);
+      for (const c of customers ?? []) customerMap.set(c.id, c);
+    }
+
+    const normalized = rows.map((o) => {
+      const customer =
+        (o.users as Record<string, unknown> | null) ||
+        customerMap.get(String(o.user_id)) ||
+        null;
+      return normalizeOrderForClient(o, {
+        customer: customer as {
+          id?: string;
+          first_name?: string | null;
+          last_name?: string | null;
+          username?: string | null;
+          telegram_id?: number | null;
+          phone?: string | null;
+        } | null,
+        seller_breakdown: groupItemsBySeller(
+          (Array.isArray(o.items) ? o.items : []) as OrderItem[]
+        ),
+      });
+    });
+
+    const total = normalized.length;
     const from = (pageNum - 1) * limitNum;
 
     res.status(200).json({
       success: true,
-      data: filtered.slice(from, from + limitNum),
+      data: normalized.slice(from, from + limitNum),
       meta: {
         page: pageNum,
         limit: limitNum,
@@ -829,61 +860,193 @@ export async function getAdminOrderById(
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    // Allow full UUID or short suffix (last 6–8 chars shown in UI as #ec5905)
+    let orderRow: Record<string, unknown> | null = null;
+
+    const byId = await supabase
       .from('orders')
       .select(
         '*, users!orders_user_id_fkey(id, first_name, last_name, username, telegram_id, phone)'
       )
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) {
+    if (byId.data) {
+      orderRow = byId.data as Record<string, unknown>;
+    } else {
       const fallback = await supabase
         .from('orders')
         .select('*')
-        .eq('id', id)
-        .single();
-      if (fallback.error || !fallback.data) {
-        throw new AppError('Order not found', 404);
-      }
-
-      const sellerIds = Array.from(
-        new Set(
-          ((fallback.data.items as OrderItem[]) || []).map((i) => i.seller_id)
-        )
+        .order('created_at', { ascending: false })
+        .limit(200);
+      const match = (fallback.data ?? []).find(
+        (o) =>
+          o.id === id ||
+          String(o.id).replace(/-/g, '').endsWith(id.replace(/^#/, ''))
       );
-
-      const { data: sellers } = await supabase
-        .from('users')
-        .select('id, first_name, last_name, username, business_name, seller_name')
-        .in('id', sellerIds.length ? sellerIds : ['00000000-0000-0000-0000-000000000000']);
-
-      res.status(200).json({
-        success: true,
-        data: {
-          ...fallback.data,
-          sellers: sellers ?? [],
-          seller_breakdown: groupItemsBySeller(fallback.data.items || []),
-        },
-      } satisfies ApiResponse);
-      return;
+      if (match) orderRow = match as Record<string, unknown>;
     }
 
+    if (!orderRow) throw new AppError('Order not found', 404);
+
+    let customer =
+      (orderRow.users as {
+        id?: string;
+        first_name?: string | null;
+        last_name?: string | null;
+        username?: string | null;
+        telegram_id?: number | null;
+        phone?: string | null;
+      } | null) || null;
+
+    if (!customer && orderRow.user_id) {
+      const { data } = await supabase
+        .from('users')
+        .select('id, first_name, last_name, username, telegram_id, phone')
+        .eq('id', orderRow.user_id)
+        .maybeSingle();
+      customer = data;
+    }
+
+    const items = (Array.isArray(orderRow.items) ? orderRow.items : []) as OrderItem[];
     const sellerIds = Array.from(
-      new Set(((data.items as OrderItem[]) || []).map((i) => i.seller_id))
+      new Set(items.map((i) => i.seller_id).filter(Boolean))
     );
     const { data: sellers } = await supabase
       .from('users')
       .select('id, first_name, last_name, username, business_name, seller_name')
-      .in('id', sellerIds.length ? sellerIds : ['00000000-0000-0000-0000-000000000000']);
+      .in(
+        'id',
+        sellerIds.length ? sellerIds : ['00000000-0000-0000-0000-000000000000']
+      );
+
+    const data = normalizeOrderForClient(orderRow, {
+      customer,
+      sellers: sellers ?? [],
+      seller_breakdown: groupItemsBySeller(items),
+    });
 
     res.status(200).json({
       success: true,
-      data: {
-        ...data,
-        sellers: sellers ?? [],
-        seller_breakdown: groupItemsBySeller(data.items || []),
-      },
+      data,
+    } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateAdminOrderStatus(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { status, payment_status } = req.body as {
+      status?: string;
+      payment_status?: string;
+    };
+
+    if (!status && !payment_status) {
+      throw new AppError('status or payment_status is required', 400);
+    }
+
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (status) updates.status = status;
+    if (payment_status) updates.payment_status = payment_status;
+
+    let { data, error } = await supabase
+      .from('orders')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      const lean = { ...updates };
+      delete lean.updated_at;
+      const retry = await supabase
+        .from('orders')
+        .update(lean)
+        .eq('id', id)
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    if (error || !data) {
+      throw new AppError(error?.message || 'Failed to update order', 500);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Order updated',
+      data: normalizeOrderForClient(data as Record<string, unknown>),
+    } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateSellerPermissions(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { receive_orders, receive_requests } = req.body as {
+      receive_orders?: boolean;
+      receive_requests?: boolean;
+    };
+
+    // id may be application id or user id
+    let userId = id;
+    const { data: app } = await supabase
+      .from('seller_applications')
+      .select('user_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (app?.user_id) userId = app.user_id;
+
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (receive_orders !== undefined) updates.receive_orders = !!receive_orders;
+    if (receive_requests !== undefined) {
+      updates.receive_requests = !!receive_requests;
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .update(updates)
+      .eq('id', userId)
+      .select(
+        'id, role, seller_status, business_name, receive_orders, receive_requests'
+      )
+      .single();
+
+    if (error) {
+      logger.error('Seller permissions update failed', {
+        message: error.message,
+        code: (error as { code?: string }).code,
+        details: (error as { details?: string }).details,
+        hint: (error as { hint?: string }).hint,
+      });
+      throw new AppError(
+        error.message ||
+          'Failed to update permissions. Run sql/004_seller_receive_flags.sql in Supabase.',
+        500
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Seller permissions updated',
+      data,
     } satisfies ApiResponse);
   } catch (err) {
     next(err);
@@ -897,14 +1060,15 @@ function groupItemsBySeller(items: OrderItem[]) {
   >();
 
   for (const item of items) {
-    const current = map.get(item.seller_id) || {
-      seller_id: item.seller_id,
+    const sid = item.seller_id || '';
+    const current = map.get(sid) || {
+      seller_id: sid,
       items: [],
       subtotal: 0,
     };
     current.items.push(item);
-    current.subtotal += item.price * item.quantity;
-    map.set(item.seller_id, current);
+    current.subtotal += Number(item.price || 0) * Number(item.quantity || 0);
+    map.set(sid, current);
   }
 
   return Array.from(map.values());

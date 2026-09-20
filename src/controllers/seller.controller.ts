@@ -290,6 +290,10 @@ export async function updateSellerProduct(
     if (existing.seller_id !== req.user.id && req.user.role !== "admin") {
       throw new AppError("Not authorized to update this product", 403);
     }
+    // Sellers may only edit products they created (seller_id must match)
+    if (req.user.role !== "admin" && !existing.seller_id) {
+      throw new AppError("Not authorized to update this product", 403);
+    }
 
     const body = { ...req.body } as Record<string, unknown>;
     let images = existing.images as string[];

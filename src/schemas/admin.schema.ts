@@ -150,3 +150,31 @@ export const sellerProductQuerySchema = z.object({
 export const idParamSchema = z.object({
   id: z.string().uuid(),
 });
+
+/** Full UUID or short UI id like ec5905 / #ec5905 */
+export const orderIdParamSchema = z.object({
+  id: z.string().min(4).max(64),
+});
+
+export const adminOrderStatusSchema = z.object({
+  status: z
+    .enum([
+      'pending',
+      'confirmed',
+      'processing',
+      'shipped',
+      'delivered',
+      'cancelled',
+      'refunded',
+      'paid',
+    ])
+    .optional(),
+  payment_status: z
+    .enum(['pending', 'paid', 'completed', 'failed', 'refunded'])
+    .optional(),
+});
+
+export const sellerPermissionsSchema = z.object({
+  receive_orders: z.boolean().optional(),
+  receive_requests: z.boolean().optional(),
+});

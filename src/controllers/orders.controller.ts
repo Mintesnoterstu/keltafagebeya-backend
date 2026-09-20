@@ -9,6 +9,7 @@ import {
   notifySellerNewOrder,
 } from '../services/telegram.service';
 import { logger } from '../config/logger';
+import { normalizeOrderForClient } from '../utils/normalizeOrder';
 
 type BodyItem = {
   product_id: string;
@@ -326,13 +327,32 @@ export async function createOrder(
       }
 
       for (const [sellerId, count] of sellerCounts) {
-        const { data: seller } = await supabase
+        let seller: {
+          telegram_id?: number;
+          receive_orders?: boolean | null;
+        } | null = null;
+
+        const withFlag = await supabase
           .from('users')
-          .select('telegram_id')
+          .select('telegram_id, receive_orders')
           .eq('id', sellerId)
           .maybeSingle();
-        if (seller?.telegram_id) {
-          await notifySellerNewOrder(seller.telegram_id, String(order.id), count);
+
+        if (withFlag.error) {
+          // Column may not exist yet — do not notify until admin enables via migration
+          logger.warn(
+            `Seller notify lookup skipped for ${sellerId}: ${withFlag.error.message}`
+          );
+          continue;
+        }
+        seller = withFlag.data;
+
+        if (seller?.receive_orders === true && seller?.telegram_id) {
+          await notifySellerNewOrder(
+            seller.telegram_id,
+            String(order.id),
+            count
+          );
         }
       }
     } catch (e) {
@@ -342,7 +362,7 @@ export async function createOrder(
     res.status(201).json({
       success: true,
       message: 'Order created',
-      data: order,
+      data: normalizeOrderForClient(order),
     } satisfies ApiResponse);
   } catch (err) {
     next(err);
@@ -381,7 +401,9 @@ export async function getOrders(
 
     res.status(200).json({
       success: true,
-      data: data ?? [],
+      data: (data ?? []).map((o) =>
+        normalizeOrderForClient(o as Record<string, unknown>)
+      ),
       meta: {
         page: pageNum,
         limit: limitNum,
@@ -415,7 +437,10 @@ export async function getOrderById(
       throw new AppError('Not authorized', 403);
     }
 
-    res.status(200).json({ success: true, data } satisfies ApiResponse);
+    res.status(200).json({
+      success: true,
+      data: normalizeOrderForClient(data as Record<string, unknown>),
+    } satisfies ApiResponse);
   } catch (err) {
     next(err);
   }
