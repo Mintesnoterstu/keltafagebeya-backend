@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-/** Normalize payment labels from checkout UI → DB values */
+/** Normalize payment labels from checkout UI → DB values (cod / cash / stripe / chapa) */
 const paymentMethodSchema = z
   .string()
   .transform((v) =>
@@ -11,14 +11,12 @@ const paymentMethodSchema = z
       .replace(/[()%]/g, '')
   )
   .transform((v) => {
-    // Strip trailing words like "50_deposit"
     if (v.startsWith('cash_on_delivery') || v === 'cod' || v === 'cashondelivery') {
       return 'cash_on_delivery';
     }
     if (v === 'card_stripe' || v === 'card' || v === 'stripe') return 'stripe';
-    if (v === 'telebirr' || v === 'cbe_birr' || v === 'bank_transfer' || v === 'chapa') {
-      return v === 'chapa' ? 'chapa' : 'chapa';
-    }
+    if (v === 'telebirr' || v === 'cbe_birr' || v === 'bank_transfer') return 'chapa';
+    if (v === 'chapa') return 'chapa';
     if (v === 'cash') return 'cash';
     return v;
   })
@@ -37,18 +35,14 @@ const paymentMethodSchema = z
     ])
   )
   .transform((v) => {
-    if (
-      v === 'cash_on_delivery' ||
-      v === 'cod' ||
-      v === 'cashondelivery' ||
-      v === 'telebirr' ||
-      v === 'cbe_birr' ||
-      v === 'bank_transfer'
-    ) {
-      return 'cash' as const;
+    if (v === 'cash_on_delivery' || v === 'cod' || v === 'cashondelivery') {
+      return 'cod' as const;
     }
     if (v === 'card_stripe') return 'stripe' as const;
-    return v as 'stripe' | 'chapa' | 'cash';
+    if (v === 'telebirr' || v === 'cbe_birr' || v === 'bank_transfer') {
+      return 'chapa' as const;
+    }
+    return v as 'stripe' | 'chapa' | 'cash' | 'cod';
   });
 
 const addressObjectSchema = z
@@ -81,11 +75,14 @@ const addressObjectSchema = z
 
     return {
       full_name: a.full_name || a.name || 'Customer',
+      name: a.name || a.full_name || 'Customer',
       phone: a.phone || '',
       city: a.city || 'Addis Ababa',
       subcity: a.subcity || a.sub_city || null,
+      sub_city: a.sub_city || a.subcity || null,
       woreda: a.woreda ?? null,
       street_address: a.street_address ?? null,
+      detail: a.detail ?? a.street_address ?? null,
       landmark: a.landmark ?? null,
       address: line,
       notes: a.notes ?? a.landmark ?? null,
@@ -93,11 +90,21 @@ const addressObjectSchema = z
     };
   });
 
+const orderItemSchema = z
+  .object({
+    product_id: z.string().min(1),
+    quantity: z.coerce.number().positive(),
+    price: z.coerce.number().nonnegative().optional(),
+    product_name: z.string().optional(),
+    name: z.string().optional(),
+    product_image: z.string().optional(),
+    image: z.string().optional(),
+    sub_total: z.coerce.number().optional(),
+  })
+  .passthrough();
+
 /**
- * Accepts checkout payloads from the Mini App:
- * - payment_method: cash_on_delivery | card_stripe | telebirr | cbe_birr | …
- * - shipping_address with street_address / woreda / sub_city (no nested `.address` required)
- * - top-level `address` alias
+ * Accepts checkout payloads from the Mini App (local cart → items in body).
  */
 export const createOrderSchema = z
   .object({
@@ -109,7 +116,7 @@ export const createOrderSchema = z
     total_amount: z.coerce.number().optional(),
     subtotal: z.coerce.number().optional(),
     delivery_fee: z.coerce.number().optional(),
-    items: z.any().optional(),
+    items: z.array(orderItemSchema).optional(),
     user_id: z.string().optional(),
     telegram_id: z.union([z.string(), z.number()]).optional(),
   })
@@ -129,6 +136,8 @@ export const createOrderSchema = z
       shipping_address: shipping,
       notes: body.notes ?? null,
       delivery_fee: body.delivery_fee,
+      total: body.total ?? body.total_amount,
+      items: body.items ?? [],
     };
   });
 

@@ -4,7 +4,6 @@ import { supabase } from '../config/supabase';
 import { AppError } from '../utils/AppError';
 import { ApiResponse, OrderItem } from '../types';
 import {
-  notifyRequestStatusChange,
   notifyCustomMessage,
   notifySellerApplicationDecision,
 } from '../services/telegram.service';
@@ -198,44 +197,92 @@ export async function updateAdminRequest(
 ): Promise<void> {
   try {
     const { id } = req.params;
-    const { status, admin_notes, assigned_to, urgency } = req.body;
+    const { status, admin_notes, assigned_to, urgency } = req.body || {};
 
     const { data: existing, error: fetchError } = await supabase
       .from('requests')
-      .select('*, users(telegram_id, id)')
+      .select('*')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (fetchError || !existing) throw new AppError('Request not found', 404);
+    if (fetchError) {
+      logger.error('Admin request fetch failed', {
+        message: fetchError.message,
+        code: (fetchError as { code?: string }).code,
+        details: (fetchError as { details?: string }).details,
+        hint: (fetchError as { hint?: string }).hint,
+      });
+      throw new AppError(fetchError.message, 500);
+    }
+    if (!existing) throw new AppError('Request not found', 404);
 
-    const updates: Record<string, unknown> = {
-      updated_at: new Date().toISOString(),
-    };
+    const updates: Record<string, unknown> = {};
     if (status !== undefined) updates.status = status;
     if (admin_notes !== undefined) updates.admin_notes = admin_notes;
     if (assigned_to !== undefined) updates.assigned_to = assigned_to;
     if (urgency !== undefined) updates.urgency = urgency;
+    updates.updated_at = new Date().toISOString();
 
-    const { data, error } = await supabase
-      .from('requests')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
+    let data: Record<string, unknown> | null = null;
+    let lastError: { message: string; code?: string; details?: string; hint?: string } | null =
+      null;
 
-    if (error || !data) {
-      throw new AppError(error?.message || 'Failed to update request', 500);
+    for (const row of [
+      updates,
+      Object.fromEntries(
+        Object.entries(updates).filter(([k]) => k !== 'updated_at')
+      ),
+      {
+        ...(status !== undefined ? { status } : {}),
+        ...(admin_notes !== undefined ? { admin_notes } : {}),
+      },
+    ]) {
+      const result = await supabase
+        .from('requests')
+        .update(row)
+        .eq('id', id)
+        .select()
+        .single();
+      if (!result.error && result.data) {
+        data = result.data as Record<string, unknown>;
+        lastError = null;
+        break;
+      }
+      lastError = {
+        message: result.error?.message || 'update failed',
+        code: (result.error as { code?: string } | null)?.code,
+        details: (result.error as { details?: string } | null)?.details,
+        hint: (result.error as { hint?: string } | null)?.hint,
+      };
+      logger.warn('Admin request update attempt failed', lastError);
+    }
+
+    if (!data) {
+      throw new AppError(lastError?.message || 'Failed to update request', 500);
     }
 
     if (status && status !== existing.status) {
-      const user = existing.users as { telegram_id: number; id: string } | null;
-      if (user) {
-        await notifyRequestStatusChange(
-          user.telegram_id,
-          user.id,
-          id,
-          status
-        );
+      const { data: customer } = await supabase
+        .from('users')
+        .select('id, telegram_id')
+        .eq('id', existing.user_id)
+        .maybeSingle();
+
+      if (customer?.telegram_id) {
+        try {
+          const productName =
+            existing.product_name || existing.title || 'your request';
+          await notifyCustomMessage(
+            customer.telegram_id,
+            customer.id,
+            `🔔 Your request for "${productName}" is now: ${status}`,
+            'Request Update'
+          );
+        } catch (e) {
+          logger.error(`Request status Telegram notify failed: ${e}`);
+        }
+      } else {
+        logger.warn(`No telegram_id for request user ${existing.user_id}`);
       }
     }
 
@@ -256,37 +303,88 @@ export async function notifyAdminRequestCustomer(
 ): Promise<void> {
   try {
     const { id } = req.params;
-    const { message } = req.body;
+    const body = (req.body || {}) as { message?: string };
+    const message =
+      (body.message && String(body.message).trim()) ||
+      'You have an update on your product request from KeltaFagebeya admin.';
 
     const { data: request, error } = await supabase
       .from('requests')
-      .select('*, users(telegram_id, id, first_name)')
+      .select('*')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (error || !request) throw new AppError('Request not found', 404);
-
-    const user = request.users as {
-      telegram_id: number;
-      id: string;
-      first_name: string;
-    } | null;
-
-    if (!user?.telegram_id) {
-      throw new AppError('Customer Telegram ID not found', 400);
+    if (error) {
+      logger.error('Notify: request lookup failed', {
+        message: error.message,
+        code: (error as { code?: string }).code,
+        details: (error as { details?: string }).details,
+        hint: (error as { hint?: string }).hint,
+      });
+      res.status(200).json({
+        success: false,
+        error: error.message,
+        message: error.message,
+      } satisfies ApiResponse);
+      return;
+    }
+    if (!request) {
+      res.status(200).json({
+        success: false,
+        error: 'Request not found',
+        message: 'Request not found',
+      } satisfies ApiResponse);
+      return;
     }
 
-    await notifyCustomMessage(
-      user.telegram_id,
-      user.id,
-      message,
-      'Request Update'
-    );
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id, telegram_id, first_name')
+      .eq('id', request.user_id)
+      .maybeSingle();
 
-    res.status(200).json({
-      success: true,
-      message: 'Notification sent',
-    } satisfies ApiResponse);
+    if (userError) {
+      logger.error('Notify: user lookup failed', {
+        message: userError.message,
+        code: (userError as { code?: string }).code,
+      });
+      res.status(200).json({
+        success: false,
+        error: userError.message,
+        message: userError.message,
+      } satisfies ApiResponse);
+      return;
+    }
+
+    if (!user?.telegram_id) {
+      res.status(200).json({
+        success: false,
+        error: 'Customer Telegram ID not found',
+        message: 'Customer Telegram ID not found',
+      } satisfies ApiResponse);
+      return;
+    }
+
+    try {
+      await notifyCustomMessage(
+        user.telegram_id,
+        user.id,
+        message,
+        'Message from KeltaFagebeya'
+      );
+      res.status(200).json({
+        success: true,
+        message: 'Notification sent',
+      } satisfies ApiResponse);
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.error(`Notify Telegram failed: ${errMsg}`);
+      res.status(200).json({
+        success: false,
+        error: errMsg,
+        message: errMsg,
+      } satisfies ApiResponse);
+    }
   } catch (err) {
     next(err);
   }

@@ -90,7 +90,7 @@ export type OrderStatus =
   | 'cancelled'
   | 'refunded';
 
-export type PaymentMethod = 'stripe' | 'chapa' | 'cash';
+export type PaymentMethod = 'stripe' | 'chapa' | 'cash' | 'cod';
 export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'refunded' | 'paid';
 
 export interface Order {

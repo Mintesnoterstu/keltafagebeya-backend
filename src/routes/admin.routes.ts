@@ -26,12 +26,16 @@ router.get(
   validate(idParamSchema, 'params'),
   adminController.getAdminRequestById
 );
-router.put(
-  '/requests/:id',
+
+// Frontend uses PATCH; also keep PUT
+const updateRequestHandlers = [
   validate(idParamSchema, 'params'),
   validate(adminRequestUpdateSchema),
-  adminController.updateAdminRequest
-);
+  adminController.updateAdminRequest,
+] as const;
+router.put('/requests/:id', ...updateRequestHandlers);
+router.patch('/requests/:id', ...updateRequestHandlers);
+
 router.post(
   '/requests/:id/notify',
   validate(idParamSchema, 'params'),
@@ -49,17 +53,22 @@ router.get(
   validate(idParamSchema, 'params'),
   adminController.getAdminSellerById
 );
-router.put(
-  '/sellers/:id/approve',
+
+// Frontend uses POST; also keep PUT
+const approveHandlers = [
   validate(idParamSchema, 'params'),
-  adminController.approveSeller
-);
-router.put(
-  '/sellers/:id/reject',
+  adminController.approveSeller,
+] as const;
+router.put('/sellers/:id/approve', ...approveHandlers);
+router.post('/sellers/:id/approve', ...approveHandlers);
+
+const rejectHandlers = [
   validate(idParamSchema, 'params'),
   validate(adminRejectSellerSchema),
-  adminController.rejectSeller
-);
+  adminController.rejectSeller,
+] as const;
+router.put('/sellers/:id/reject', ...rejectHandlers);
+router.post('/sellers/:id/reject', ...rejectHandlers);
 
 router.get(
   '/orders',

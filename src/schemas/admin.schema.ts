@@ -24,9 +24,33 @@ export const adminRequestUpdateSchema = z.object({
   urgency: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
 });
 
-export const adminNotifySchema = z.object({
-  message: z.string().min(1).max(4000),
-});
+export const adminNotifySchema = z
+  .object({
+    message: z.string().min(1).max(500).optional(),
+    text: z.string().min(1).max(500).optional(),
+    body: z.string().min(1).max(500).optional(),
+    admin_notes: z.string().min(1).max(500).optional(),
+    notes: z.string().min(1).max(500).optional(),
+  })
+  .passthrough()
+  .transform((v) => {
+    const message =
+      v.message || v.text || v.body || v.admin_notes || v.notes || '';
+    return { message };
+  })
+  .superRefine((v, ctx) => {
+    // Allow empty — controller will fall back to a default note
+    if (v.message && v.message.length > 500) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.too_big,
+        maximum: 500,
+        type: 'string',
+        inclusive: true,
+        message: 'message too long',
+        path: ['message'],
+      });
+    }
+  });
 
 export const adminListQuerySchema = z.object({
   status: z.string().optional(),
