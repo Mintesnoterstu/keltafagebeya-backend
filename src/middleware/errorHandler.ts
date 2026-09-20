@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import { ZodError, ZodSchema } from 'zod';
 import { AppError } from '../utils/AppError';
 import { logger } from '../config/logger';
-import { env } from '../config/env';
 import { ApiResponse } from '../types';
 import { notifySystemError } from '../services/telegram.service';
 
@@ -26,15 +25,12 @@ export function errorHandler(
       path: e.path.join('.') || '(root)',
       message: e.message,
     }));
-    const first = details[0];
-    const summary = first
-      ? `${first.path}: ${first.message}`
-      : 'Validation failed';
+    const summary = details.map((d) => `${d.path}: ${d.message}`).join('; ');
 
     res.status(400).json({
       success: false,
       error: 'Validation failed',
-      message: summary,
+      message: summary || 'Validation failed',
       data: details,
     } satisfies ApiResponse);
     return;
@@ -49,8 +45,8 @@ export function errorHandler(
 
   res.status(500).json({
     success: false,
-    error: env.isDev ? err.message : 'Internal server error',
-    message: env.isDev ? err.message : 'Internal server error',
+    error: err.message || 'Internal server error',
+    message: err.message || 'Internal server error',
   } satisfies ApiResponse);
 }
 

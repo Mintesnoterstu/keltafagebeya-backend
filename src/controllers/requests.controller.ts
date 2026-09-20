@@ -18,53 +18,69 @@ export async function createRequest(
     if (!req.user) throw new AppError('Not authenticated', 401);
 
     const payload = req.body as {
-      title: string;
+      product_name: string;
       description: string | null;
       budget: number | null;
+      price_range: string | null;
       category: string | null;
       urgency: string;
+      contact_phone: string | null;
       images: string[];
     };
 
-    const productName = payload.title;
-    let { data, error } = await supabase
-      .from('requests')
-      .insert({
-        title: productName,
+    const productName = payload.product_name;
+
+    // Live schema: product_name (NO title column)
+    const insertAttempts: Record<string, unknown>[] = [
+      {
+        user_id: req.user.id,
         product_name: productName,
         description: payload.description,
-        budget: payload.budget,
         category: payload.category,
         urgency: payload.urgency || 'normal',
-        images: payload.images || [],
-        user_id: req.user.id,
         status: 'pending',
-      })
-      .select()
-      .single();
+        contact_phone: payload.contact_phone,
+        price_range: payload.price_range,
+        budget: payload.budget,
+        images: payload.images || [],
+      },
+      {
+        user_id: req.user.id,
+        product_name: productName,
+        description: payload.description,
+        category: payload.category,
+        urgency: payload.urgency || 'normal',
+        status: 'pending',
+        contact_phone: payload.contact_phone,
+        price_range: payload.price_range,
+      },
+      {
+        user_id: req.user.id,
+        product_name: productName,
+        description: payload.description,
+        category: payload.category,
+        urgency: payload.urgency || 'normal',
+        status: 'pending',
+      },
+    ];
 
-    if (error) {
-      logger.warn(`Request insert retry: ${error.message}`);
-      const retry = await supabase
-        .from('requests')
-        .insert({
-          product_name: productName,
-          title: productName,
-          description: payload.description,
-          category: payload.category,
-          urgency: payload.urgency || 'normal',
-          user_id: req.user.id,
-          status: 'pending',
-        })
-        .select()
-        .single();
-      data = retry.data;
-      error = retry.error;
+    let data: Record<string, unknown> | null = null;
+    let lastError: string | null = null;
+
+    for (const row of insertAttempts) {
+      const result = await supabase.from('requests').insert(row).select().single();
+      if (!result.error && result.data) {
+        data = result.data as Record<string, unknown>;
+        lastError = null;
+        break;
+      }
+      lastError = result.error?.message || 'insert failed';
+      logger.warn(`Request insert attempt failed: ${lastError}`);
     }
 
-    if (error || !data) {
-      logger.error(`Create request failed: ${error?.message}`);
-      throw new AppError(error?.message || 'Failed to create request', 500);
+    if (!data) {
+      logger.error(`Create request failed: ${lastError}`);
+      throw new AppError(lastError || 'Failed to create request', 500);
     }
 
     const userName =
@@ -72,13 +88,13 @@ export async function createRequest(
 
     try {
       await notifyNewRequest({
-        requestId: data.id,
-        productName: data.product_name || data.title || productName,
+        requestId: String(data.id),
+        productName: String(data.product_name || productName),
         customerName: userName,
         username: req.user.username,
-        category: data.category,
-        urgency: data.urgency,
-        description: data.description,
+        category: (data.category as string) || payload.category,
+        urgency: (data.urgency as string) || payload.urgency,
+        description: (data.description as string) || payload.description,
       });
     } catch (notifyErr) {
       logger.error(`Request saved but Telegram notify failed: ${notifyErr}`);
@@ -118,7 +134,10 @@ export async function getRequests(
 
     if (error) throw new AppError(error.message, 500);
 
-    const body: ApiResponse = { success: true, data };
+    const body: ApiResponse = {
+      success: true,
+      data: data ?? [],
+    };
     res.status(200).json(body);
   } catch (err) {
     next(err);
@@ -147,7 +166,10 @@ export async function getRequestById(
       throw new AppError('Not authorized', 403);
     }
 
-    const body: ApiResponse = { success: true, data };
+    const body: ApiResponse = {
+      success: true,
+      data,
+    };
     res.status(200).json(body);
   } catch (err) {
     next(err);
@@ -161,23 +183,24 @@ export async function updateRequest(
 ): Promise<void> {
   try {
     if (!req.user) throw new AppError('Not authenticated', 401);
+    if (req.user.role !== 'admin') {
+      throw new AppError('Admin access required', 403);
+    }
 
     const { id } = req.params;
     const { status, admin_notes, assigned_to } = req.body;
 
-    const { data: existing, error: fetchError } = await supabase
+    const { data: existing, error: findError } = await supabase
       .from('requests')
-      .select('*, users(telegram_id, id)')
+      .select('*')
       .eq('id', id)
       .single();
 
-    if (fetchError || !existing) throw new AppError('Request not found', 404);
+    if (findError || !existing) throw new AppError('Request not found', 404);
 
-    const updates: Record<string, unknown> = {
-      status,
-      admin_notes: admin_notes ?? existing.admin_notes,
-      updated_at: new Date().toISOString(),
-    };
+    const updates: Record<string, unknown> = {};
+    if (status !== undefined) updates.status = status;
+    if (admin_notes !== undefined) updates.admin_notes = admin_notes;
     if (assigned_to !== undefined) updates.assigned_to = assigned_to;
 
     const { data, error } = await supabase
@@ -191,14 +214,24 @@ export async function updateRequest(
       throw new AppError(error?.message || 'Failed to update request', 500);
     }
 
-    const user = existing.users as { telegram_id: number; id: string } | null;
-    if (user) {
-      await notifyRequestStatusChange(
-        user.telegram_id,
-        user.id,
-        id,
-        status
-      );
+    if (status && status !== existing.status) {
+      try {
+        const { data: owner } = await supabase
+          .from('users')
+          .select('telegram_id, id')
+          .eq('id', existing.user_id)
+          .maybeSingle();
+        if (owner?.telegram_id) {
+          await notifyRequestStatusChange(
+            owner.telegram_id,
+            owner.id,
+            id,
+            status
+          );
+        }
+      } catch (e) {
+        logger.error(`Request status notify failed: ${e}`);
+      }
     }
 
     const body: ApiResponse = {

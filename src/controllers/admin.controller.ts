@@ -402,6 +402,60 @@ export async function getAdminSellerById(
   }
 }
 
+async function loadSellerApplication(id: string) {
+  const { data, error } = await supabase
+    .from('seller_applications')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    logger.error(`seller_applications lookup failed: ${error.message}`, error);
+    throw new AppError(error.message || 'Failed to load application', 500);
+  }
+  if (!data) {
+    throw new AppError('Application not found', 404);
+  }
+  return data;
+}
+
+async function updateApplicationStatus(
+  id: string,
+  payload: Record<string, unknown>
+) {
+  // Try full payload, then lean (schema may miss reviewed_* / updated_at)
+  const attempts = [
+    payload,
+    {
+      status: payload.status,
+      admin_notes: payload.admin_notes,
+      reviewed_by: payload.reviewed_by,
+      reviewed_at: payload.reviewed_at,
+    },
+    { status: payload.status, admin_notes: payload.admin_notes },
+    { status: payload.status },
+  ];
+
+  let lastError: string | null = null;
+  for (const row of attempts) {
+    const clean = Object.fromEntries(
+      Object.entries(row).filter(([, v]) => v !== undefined)
+    );
+    const { data, error } = await supabase
+      .from('seller_applications')
+      .update(clean)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (!error && data) return data;
+    lastError = error?.message || 'update failed';
+    logger.warn(`seller_applications update attempt failed: ${lastError}`);
+  }
+
+  throw new AppError(lastError || 'Failed to update application', 500);
+}
+
 export async function approveSeller(
   req: AuthRequest,
   res: Response,
@@ -411,15 +465,7 @@ export async function approveSeller(
     if (!req.user) throw new AppError('Not authenticated', 401);
     const { id } = req.params;
 
-    const { data: application, error } = await supabase
-      .from('seller_applications')
-      .select('*, users(telegram_id, id)')
-      .eq('id', id)
-      .single();
-
-    if (error || !application) {
-      throw new AppError('Application not found', 404);
-    }
+    const application = await loadSellerApplication(id);
 
     if (application.status === 'approved') {
       throw new AppError('Application already approved', 409);
@@ -427,25 +473,15 @@ export async function approveSeller(
 
     const now = new Date().toISOString();
 
-    const { data: updated, error: updateError } = await supabase
-      .from('seller_applications')
-      .update({
-        status: 'approved',
-        reviewed_by: req.user.id,
-        reviewed_at: now,
-        updated_at: now,
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    const updated = await updateApplicationStatus(id, {
+      status: 'approved',
+      reviewed_by: req.user.id,
+      reviewed_at: now,
+      updated_at: now,
+    });
 
-    if (updateError || !updated) {
-      throw new AppError(updateError?.message || 'Failed to approve', 500);
-    }
-
-    await supabase
-      .from('users')
-      .update({
+    const userUpdates: Record<string, unknown>[] = [
+      {
         role: 'seller',
         is_seller: true,
         seller_status: 'approved',
@@ -457,12 +493,59 @@ export async function approveSeller(
         seller_bio: application.business_description,
         phone: application.phone,
         updated_at: now,
-      })
-      .eq('id', application.user_id);
+      },
+      {
+        role: 'seller',
+        is_seller: true,
+        seller_status: 'approved',
+        business_name: application.business_name,
+        phone: application.phone,
+      },
+      {
+        role: 'seller',
+        seller_status: 'approved',
+      },
+    ];
 
-    const user = application.users as { telegram_id: number; id: string } | null;
-    if (user) {
-      await notifySellerApplicationDecision(user.telegram_id, user.id, true);
+    let userUpdateOk = false;
+    let userUpdateError: string | null = null;
+    for (const row of userUpdates) {
+      const { error } = await supabase
+        .from('users')
+        .update(row)
+        .eq('id', application.user_id);
+      if (!error) {
+        userUpdateOk = true;
+        break;
+      }
+      userUpdateError = error.message;
+      logger.warn(`users seller approve update failed: ${error.message}`);
+    }
+
+    if (!userUpdateOk) {
+      throw new AppError(
+        userUpdateError ||
+          'Application approved but failed to update user seller role',
+        500
+      );
+    }
+
+    const { data: applicant } = await supabase
+      .from('users')
+      .select('id, telegram_id')
+      .eq('id', application.user_id)
+      .maybeSingle();
+
+    if (applicant?.telegram_id) {
+      try {
+        await notifySellerApplicationDecision(
+          applicant.telegram_id,
+          applicant.id,
+          true
+        );
+      } catch (e) {
+        logger.error(`Approve notify failed: ${e}`);
+      }
     }
 
     res.status(200).json({
@@ -483,17 +566,11 @@ export async function rejectSeller(
   try {
     if (!req.user) throw new AppError('Not authenticated', 401);
     const { id } = req.params;
-    const { admin_notes } = req.body;
+    const { admin_notes } = (req.body || {}) as {
+      admin_notes?: string | null;
+    };
 
-    const { data: application, error } = await supabase
-      .from('seller_applications')
-      .select('*, users(telegram_id, id)')
-      .eq('id', id)
-      .single();
-
-    if (error || !application) {
-      throw new AppError('Application not found', 404);
-    }
+    const application = await loadSellerApplication(id);
 
     if (application.status === 'rejected') {
       throw new AppError('Application already rejected', 409);
@@ -501,40 +578,49 @@ export async function rejectSeller(
 
     const now = new Date().toISOString();
 
-    const { data: updated, error: updateError } = await supabase
-      .from('seller_applications')
-      .update({
-        status: 'rejected',
-        admin_notes: admin_notes ?? application.admin_notes,
-        reviewed_by: req.user.id,
-        reviewed_at: now,
-        updated_at: now,
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    const updated = await updateApplicationStatus(id, {
+      status: 'rejected',
+      admin_notes: admin_notes ?? application.admin_notes ?? null,
+      reviewed_by: req.user.id,
+      reviewed_at: now,
+      updated_at: now,
+    });
 
-    if (updateError || !updated) {
-      throw new AppError(updateError?.message || 'Failed to reject', 500);
-    }
-
-    await supabase
-      .from('users')
-      .update({
+    const userUpdates: Record<string, unknown>[] = [
+      {
         seller_status: 'rejected',
         admin_notes: admin_notes ?? null,
         updated_at: now,
-      })
-      .eq('id', application.user_id);
+      },
+      { seller_status: 'rejected' },
+    ];
 
-    const user = application.users as { telegram_id: number; id: string } | null;
-    if (user) {
-      await notifySellerApplicationDecision(
-        user.telegram_id,
-        user.id,
-        false,
-        admin_notes
-      );
+    for (const row of userUpdates) {
+      const { error } = await supabase
+        .from('users')
+        .update(row)
+        .eq('id', application.user_id);
+      if (!error) break;
+      logger.warn(`users seller reject update failed: ${error.message}`);
+    }
+
+    const { data: applicant } = await supabase
+      .from('users')
+      .select('id, telegram_id')
+      .eq('id', application.user_id)
+      .maybeSingle();
+
+    if (applicant?.telegram_id) {
+      try {
+        await notifySellerApplicationDecision(
+          applicant.telegram_id,
+          applicant.id,
+          false,
+          admin_notes || undefined
+        );
+      } catch (e) {
+        logger.error(`Reject notify failed: ${e}`);
+      }
     }
 
     res.status(200).json({

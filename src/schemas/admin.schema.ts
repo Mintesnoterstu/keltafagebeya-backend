@@ -39,9 +39,13 @@ export const adminListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const adminRejectSellerSchema = z.object({
-  admin_notes: z.string().max(2000).optional().nullable(),
-});
+export const adminRejectSellerSchema = z
+  .object({
+    admin_notes: z.string().max(2000).optional().nullable(),
+  })
+  .passthrough()
+  .optional()
+  .default({});
 
 export const sellerApplicationSchema = z.object({
   business_name: z.string().min(2).max(150),
