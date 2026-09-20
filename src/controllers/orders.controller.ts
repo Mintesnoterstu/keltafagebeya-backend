@@ -7,9 +7,11 @@ import {
   notifyNewOrder,
   notifyOrderStatusChange,
   notifySellerNewOrder,
+  sendTelegramNotification,
 } from '../services/telegram.service';
 import { logger } from '../config/logger';
 import { normalizeOrderForClient } from '../utils/normalizeOrder';
+import { env } from '../config/env';
 
 type BodyItem = {
   product_id: string;
@@ -532,7 +534,82 @@ export async function updateOrderStatus(
     res.status(200).json({
       success: true,
       message: 'Order status updated',
-      data,
+      data: normalizeOrderForClient(data as Record<string, unknown>),
+    } satisfies ApiResponse);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Customer confirms they received the product */
+export async function confirmOrderReceived(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user) throw new AppError('Not authenticated', 401);
+    const { id } = req.params;
+
+    const { data: existing, error: findError } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (findError || !existing) throw new AppError('Order not found', 404);
+    if (existing.user_id !== req.user.id && req.user.role !== 'admin') {
+      throw new AppError('Not authorized', 403);
+    }
+
+    const updates: Record<string, unknown> = {
+      status: 'delivered',
+      payment_status:
+        existing.payment_method === 'cod' || existing.payment_method === 'cash'
+          ? 'paid'
+          : existing.payment_status || 'paid',
+      updated_at: new Date().toISOString(),
+    };
+
+    let { data, error } = await supabase
+      .from('orders')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      const lean = {
+        status: 'delivered',
+        payment_status: updates.payment_status,
+      };
+      const retry = await supabase
+        .from('orders')
+        .update(lean)
+        .eq('id', id)
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    if (error || !data) {
+      throw new AppError(error?.message || 'Failed to confirm order', 500);
+    }
+
+    try {
+      await sendTelegramNotification(
+        env.TELEGRAM_ADMIN_CHAT_ID,
+        `✅ Customer confirmed receipt\nOrder: <code>${id.slice(0, 8)}</code>\nBuyer: ${req.user.first_name}`
+      );
+    } catch (e) {
+      logger.error(`Confirm-received admin notify failed: ${e}`);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Order marked as received',
+      data: normalizeOrderForClient(data as Record<string, unknown>),
     } satisfies ApiResponse);
   } catch (err) {
     next(err);

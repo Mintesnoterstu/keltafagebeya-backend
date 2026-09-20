@@ -6,6 +6,7 @@ import { ApiResponse, OrderItem } from '../types';
 import {
   notifyCustomMessage,
   notifySellerApplicationDecision,
+  notifyOrderStatusChange,
 } from '../services/telegram.service';
 import { logger } from '../config/logger';
 import { normalizeOrderForClient } from '../utils/normalizeOrder';
@@ -979,6 +980,26 @@ export async function updateAdminOrderStatus(
 
     if (error || !data) {
       throw new AppError(error?.message || 'Failed to update order', 500);
+    }
+
+    if (status) {
+      try {
+        const { data: buyer } = await supabase
+          .from('users')
+          .select('telegram_id, id')
+          .eq('id', data.user_id)
+          .maybeSingle();
+        if (buyer?.telegram_id) {
+          await notifyOrderStatusChange(
+            buyer.telegram_id,
+            buyer.id,
+            id,
+            status
+          );
+        }
+      } catch (e) {
+        logger.error(`Admin order status notify failed: ${e}`);
+      }
     }
 
     res.status(200).json({
